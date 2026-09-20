@@ -16,7 +16,9 @@ class AnalysisConfig(JsonSerializable):
     Attributes:
         random_seed: Seed for every source of randomness. Same input and seed give the same
             output. Must be zero or greater.
-        row_threshold: Above this many rows, analyses work on a deterministic sample.
+        row_threshold: Above this many rows, analyses that apply the size guardrails work on a
+            seeded sample of exactly this many rows. Analyses that need exact counts, such as
+            the schema profile, always use every row.
         column_threshold: Above this many columns, pairwise computations are skipped.
     """
 

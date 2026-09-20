@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
 ]
 dependencies = [
+    "numpy>=2.2",
     "pandas>=2.3",
     "rich>=15.0.0",
     "typer>=0.27.2",
