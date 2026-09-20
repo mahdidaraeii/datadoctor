@@ -1,0 +1,204 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+from datadoctor import AnalysisConfig, AnalysisResult, Dataset, Severity, load_dataset
+from datadoctor.core.exceptions import DatasetError
+from datadoctor.quality.dtypes import check_dtypes
+
+CONFIG = AnalysisConfig()
+
+
+def run(frame):
+    return check_dtypes(Dataset(data=frame, name="t"), CONFIG)
+
+
+def column(result, name):
+    return next(c for c in result.metrics["columns"] if c["name"] == name)
+
+
+def kinds(result):
+    return {c["name"]: c["kind"] for c in result.metrics["columns"]}
+
+
+def finding(result, title):
+    (found,) = [f for f in result.findings if f.title == title]
+    return found
+
+
+def numbers(n):
+    return [str(k * 3) for k in range(n)]
+
+
+class TestNumbersStoredAsText:
+    def test_the_column_is_reported_with_the_tokens_that_keep_it_from_being_numeric(self):
+        # 96 numbers (plain, with a thousands comma, negative, exponent) and four placeholders.
+        values = ["12.5", "1,234.5", "-3", "7e2"] * 24 + ["?", "?", "-", "unknown"]
+
+        result = run(pd.DataFrame({"price": values}))
+
+        c = column(result, "price")
+        assert kinds(result) == {"price": "numbers_as_text"}
+        assert (c["numeric_share"], c["non_numeric"]) == (0.96, 4)
+        assert c["tokens"] == [
+            {"token": "?", "count": 2},
+            {"token": "-", "count": 1},
+            {"token": "unknown", "count": 1},
+        ]
+        found = finding(result, "Numbers stored as text")
+        assert (found.severity, found.confidence) == (Severity.MEDIUM, 0.8)
+        assert found.affected_columns == ("price",)
+        assert "96.0% parse as numbers" in found.evidence
+        assert "'?' x2, '-' x1, 'unknown' x1" in found.evidence
+
+    def test_confidence_is_higher_when_every_value_parses(self):
+        result = run(pd.DataFrame({"clean": numbers(100)}))
+
+        found = finding(result, "Numbers stored as text")
+
+        assert found.confidence == 0.9
+        assert "every value parses as a number" in found.evidence
+
+    def test_the_cutoff_is_95_percent_and_inclusive(self):
+        def share(numeric):
+            return run(pd.DataFrame({"c": numbers(numeric) + ["x"] * (100 - numeric)}))
+
+        assert kinds(share(95)) == {"c": "numbers_as_text"}
+        assert kinds(share(94)) == {}
+
+    def test_a_short_column_is_not_judged(self):
+        assert kinds(run(pd.DataFrame({"c": numbers(15)}))) == {}
+
+    def test_long_tokens_are_not_listed_and_at_most_five_are(self):
+        # The long value is the most frequent non-numeric one, so it would rank first if it were
+        # listed. It is 41 characters, over the limit of 20.
+        long_value = "this is a real value that failed to parse"
+        values = numbers(191) + [long_value] * 3 + list("abcdefg")
+        result = run(pd.DataFrame({"c": values}))
+
+        c = column(result, "c")
+
+        assert [t["token"] for t in c["tokens"]] == ["a", "b", "c", "d", "e"]
+        assert c["tokens_not_listed"] == 5  # the three long values, f and g
+        assert long_value not in finding(result, "Numbers stored as text").evidence
+
+    def test_empty_strings_are_shown_as_empty(self):
+        result = run(pd.DataFrame({"c": numbers(96) + [""] * 4}))
+
+        assert "(empty) x4" in finding(result, "Numbers stored as text").evidence
+
+    def test_formats_that_are_ambiguous_or_carry_symbols_are_not_guessed(self):
+        frame = pd.DataFrame(
+            {"european": ["1.234,5"] * 100, "money": ["$12"] * 100, "percent": ["45%"] * 100}
+        )
+
+        assert kinds(run(frame)) == {}
+
+    def test_many_columns_make_one_finding(self):
+        frame = pd.DataFrame({f"c{i}": numbers(100) for i in range(12)})
+
+        result = run(frame)
+
+        found = finding(result, "Numbers stored as text")
+        assert len(result.findings) == 1
+        assert "12 text columns hold" in found.evidence
+        assert "and 7 more" in found.evidence
+
+
+class TestLeadingZeros:
+    def test_zero_padded_values_are_reported_as_codes_and_not_as_numbers(self):
+        frame = pd.DataFrame({"zip": [f"{k:05d}" for k in range(100)], "clean": numbers(100)})
+
+        result = run(frame)
+
+        assert kinds(result) == {"zip": "numeric_codes", "clean": "numbers_as_text"}
+        codes = finding(result, "Numeric-looking columns with leading zeros")
+        assert (codes.severity, codes.confidence) == (Severity.INFO, 0.6)
+        assert codes.affected_columns == ("zip",)
+        assert "100 values with a leading zero" in codes.evidence
+        assert "cannot be undone" in codes.interpretation
+        assert finding(result, "Numbers stored as text").affected_columns == ("clean",)
+
+    def test_a_decimal_below_one_is_not_a_leading_zero(self):
+        result = run(pd.DataFrame({"c": [f"0.{k}" for k in range(100)]}))
+
+        assert kinds(result) == {"c": "numbers_as_text"}
+
+
+class TestMixedTypes:
+    def test_an_excel_column_of_numbers_and_text_gets_exact_type_counts(self, tmp_path):
+        path = tmp_path / "mixed.xlsx"
+        # "n/a" would be read as missing by the loader, so the placeholder is "unknown".
+        pd.DataFrame({"v": pd.Series([1, 2, "unknown", 4.5, "x"] * 20, dtype=object)}).to_excel(
+            path, index=False
+        )
+
+        result = check_dtypes(load_dataset(path), CONFIG)
+
+        assert column(result, "v")["types"] == {"int": 40, "str": 40, "float": 20}
+        found = finding(result, "Columns mix value types")
+        assert (found.severity, found.confidence) == (Severity.MEDIUM, 1.0)
+        assert "int 40, str 40, float 20" in found.evidence
+
+    def test_a_json_field_that_changes_type_is_found_including_containers(self, tmp_path):
+        path = tmp_path / "mixed.json"
+        rows = ['{"v": 1}', '{"v": "a"}', '{"v": true}', '{"v": [1]}'] * 25
+        path.write_text("[" + ",".join(rows) + "]", encoding="utf-8")
+
+        result = check_dtypes(load_dataset(path), CONFIG)
+
+        assert column(result, "v")["types"] == {"bool": 25, "int": 25, "list": 25, "str": 25}
+
+    def test_numpy_scalars_are_named_like_python_ones(self):
+        values = [np.bool_(True), np.int64(3), np.float64(2.5), "x"] * 25
+
+        result = run(pd.DataFrame({"v": pd.Series(values, dtype=object)}))
+
+        assert column(result, "v")["types"] == {"bool": 25, "float": 25, "int": 25, "str": 25}
+
+    def test_a_column_of_one_type_is_not_mixed(self):
+        frame = pd.DataFrame(
+            {
+                "ints": pd.Series(range(100), dtype=object),
+                "dicts": pd.Series([{"k": 1}] * 100, dtype=object),
+            }
+        )
+
+        assert kinds(run(frame)) == {}
+
+
+class TestNothingIsConverted:
+    def test_the_frame_is_left_exactly_as_it_was(self):
+        frame = pd.DataFrame(
+            {"price": numbers(96) + ["?"] * 4, "zip": [f"{k:05d}" for k in range(100)]}
+        )
+        snapshot = frame.copy(deep=True)
+
+        result = run(frame)
+
+        assert result.findings
+        pd.testing.assert_frame_equal(frame, snapshot)
+
+
+class TestResult:
+    def test_config_is_recorded_and_the_result_is_deterministic(self):
+        config = AnalysisConfig(random_seed=7, row_threshold=10)
+        dataset = Dataset(data=pd.DataFrame({"c": numbers(100)}), name="t")
+
+        first = check_dtypes(dataset, config)
+        second = check_dtypes(dataset, config)
+
+        assert first.config == config
+        assert first == second
+        assert AnalysisResult.from_json(first.to_json()) == first
+
+    def test_the_size_guardrails_do_not_sample_the_rows(self):
+        dataset = Dataset(data=pd.DataFrame({"c": numbers(100)}), name="t")
+
+        result = check_dtypes(dataset, AnalysisConfig(row_threshold=10))
+
+        assert column(result, "c")["non_null"] == 100
+
+    def test_a_dataset_without_rows_is_rejected(self):
+        with pytest.raises(DatasetError, match="no rows"):
+            run(pd.DataFrame({"a": []}))
