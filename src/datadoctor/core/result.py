@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from datadoctor.core.config import AnalysisConfig
 from datadoctor.core.exceptions import SerializationError
 from datadoctor.core.serialization import JsonSerializable, ensure_json_roundtrip, require_keys
 
@@ -126,13 +127,19 @@ class AnalysisResult(JsonSerializable):
         metrics: Named numbers and small structures. Every value must survive a strict JSON
             round trip, so use ``None`` for an undefined value, never NaN, and plain Python types.
         artifacts: Files written during the analysis, such as plots, keyed by a stable name.
+        config: The settings the analysis ran under, or ``None`` for an analysis that uses none.
+            This can differ from the config recorded in the dataset's provenance, which is the
+            one it was loaded under.
     """
 
     findings: tuple[Finding, ...] = ()
     metrics: dict[str, Any] = field(default_factory=dict)
     artifacts: dict[str, Path] = field(default_factory=dict)
+    config: AnalysisConfig | None = None
 
     def __post_init__(self) -> None:
+        if self.config is not None and not isinstance(self.config, AnalysisConfig):
+            raise TypeError(f"config must be an AnalysisConfig, got {type(self.config).__name__}")
         findings = tuple(self.findings)
         for finding in findings:
             if not isinstance(finding, Finding):
@@ -157,13 +164,17 @@ class AnalysisResult(JsonSerializable):
             "findings": [finding.to_dict() for finding in self.findings],
             "metrics": copy.deepcopy(self.metrics),
             "artifacts": {key: path.as_posix() for key, path in self.artifacts.items()},
+            "config": None if self.config is None else self.config.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AnalysisResult":
-        require_keys("AnalysisResult", data, optional=("findings", "metrics", "artifacts"))
+        optional = ("findings", "metrics", "artifacts", "config")
+        require_keys("AnalysisResult", data, optional=optional)
+        config = data.get("config")
         return cls(
             findings=tuple(Finding.from_dict(item) for item in data.get("findings", [])),
             metrics=data.get("metrics", {}),
             artifacts=data.get("artifacts", {}),
+            config=None if config is None else AnalysisConfig.from_dict(config),
         )

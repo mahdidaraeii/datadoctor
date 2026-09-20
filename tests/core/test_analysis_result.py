@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from datadoctor.core.config import AnalysisConfig
 from datadoctor.core.exceptions import SerializationError
 from datadoctor.core.result import AnalysisResult, Severity
 
@@ -102,6 +103,23 @@ class TestValidation:
     def test_artifact_names_must_be_strings(self):
         with pytest.raises(TypeError, match="artifact names"):
             AnalysisResult(artifacts={1: "a.png"})
+
+
+class TestConfig:
+    def test_the_config_an_analysis_ran_under_survives_json(self):
+        result = AnalysisResult(config=AnalysisConfig(random_seed=7, row_threshold=500))
+
+        restored = AnalysisResult.from_json(result.to_json())
+
+        assert restored == result
+        assert restored.config.row_threshold == 500
+
+    def test_an_analysis_that_uses_no_config_records_none(self):
+        assert AnalysisResult().to_dict()["config"] is None
+
+    def test_config_must_be_an_analysis_config(self):
+        with pytest.raises(TypeError, match="AnalysisConfig"):
+            AnalysisResult(config={"random_seed": 7})
 
 
 class TestSerialization:
