@@ -217,6 +217,54 @@ class TestResultShape:
         assert names == ["1", "2"]
 
 
+def type_of(values):
+    frame = pd.DataFrame({"d": values})
+    return profile_schema(Dataset(data=frame, name="t")).metrics["columns"][0]["semantic_type"]
+
+
+class TestIsoTextDates:
+    def test_far_future_dates_are_a_datetime_on_every_pandas_version(self):
+        # pandas 2.3 cannot hold these as datetime64[ns] and turns them into NaT, while pandas 3.0
+        # can. The type must not depend on which one is installed.
+        values = (["9999-12-31", "3000-01-01", "2262-04-12", "2024-01-01"] * 8)[:30]
+
+        assert type_of(values) == "datetime"
+
+    def test_far_future_dates_with_times_and_offsets_are_a_datetime_too(self):
+        values = [
+            "9999-12-31T23:59:59Z",
+            "3000-01-01 00:00:00+02:00",
+            "2262-04-12T10:30:00.123456",
+            "0001-06-30T12:00:00.123456789",  # nanosecond digits outside pandas' nanosecond range
+            "2024-01-01T00:00",
+        ] * 8
+
+        assert type_of(values) == "datetime"
+
+    def test_the_largest_valid_clock_and_offset_values_are_accepted(self):
+        values = ["2024-01-05T23:59:59+23:59", "2024-01-05T23:59-2359", "2024-01-05 00:00:00Z"] * 10
+
+        assert type_of(values) == "datetime"
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "2024-02-30",  # not a calendar date
+            "2024-13-01",  # month 13
+            "2024-01-05T24:00:00",  # hour 24
+            "2024-01-05T10:60:00",  # minute 60
+            "2024-01-05T10:30:60",  # second 60
+            "2024-01-05T10:30+24:00",  # offset hour 24
+            "2024-01-05T10:30+02:60",  # offset minute 60
+            "2024-01-05T10:30:00 +02:00",  # a space before the offset
+        ],
+    )
+    def test_one_value_that_is_not_a_real_date_or_time_rules_the_column_out(self, bad):
+        values = ["2024-01-05"] * 29 + [bad]
+
+        assert type_of(values) == "categorical"
+
+
 def test_semantic_type_values_are_the_documented_words():
     assert [t.value for t in SemanticType] == [
         "numeric",

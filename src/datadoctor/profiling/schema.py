@@ -9,6 +9,7 @@ import re
 from enum import Enum
 from typing import NamedTuple
 
+import numpy as np
 import pandas as pd
 from pandas.api import types as pt
 
@@ -33,8 +34,11 @@ _ID_NAME = re.compile(r"(?:^|[^a-z0-9])(?:id|uuid|guid|key)$", re.IGNORECASE)
 _CAMEL_ID_NAME = re.compile(r"[a-z0-9](?:Id|ID)$")
 _ISO_8601 = re.compile(
     r"\d{4}-\d{2}-\d{2}"
-    r"(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+    r"(?:[T ](?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2})(?:\.\d+)?)?"
+    r"(?:Z|[+-](?P<offset_hour>\d{2}):?(?P<offset_minute>\d{2}))?)?"
 )
+# The largest value each clock part of an ISO 8601 text can have. A second of 60 is rejected too.
+_TIME_LIMITS = {"hour": 23, "minute": 59, "second": 59, "offset_hour": 23, "offset_minute": 59}
 
 _NUMERIC_KINDS = {"integer", "floating", "mixed-integer-float"}
 _DATETIME_KINDS = {"datetime64", "datetime", "date"}
@@ -156,11 +160,21 @@ def _try_cardinality(non_null: pd.Series) -> int | None:
 
 
 def _is_iso_8601(non_null: pd.Series) -> bool:
-    # The pattern gate comes first because pandas alone parses year-like text such as "1234".
+    # The pattern gate comes first because a parser alone accepts year-like text such as "1234".
     if not non_null.str.fullmatch(_ISO_8601).all():
         return False
-    parsed = pd.to_datetime(non_null, format="ISO8601", utc=True, errors="coerce")
-    return bool(parsed.notna().all())
+    # The date and the time are checked here and not with pandas. pandas 2.x holds dates as
+    # datetime64[ns] and turns anything outside roughly 1677 to 2262, such as 9999-12-31 or
+    # 0001-01-01, into NaT, so the same column would be typed differently on pandas 2.x and 3.x.
+    # numpy's day-resolution dates cover every year and reject dates that do not exist.
+    try:
+        np.array(non_null.str[:10], dtype="datetime64[D]")
+    except ValueError:
+        return False
+    times = non_null.str.extract(_ISO_8601)
+    return not any(
+        (pd.to_numeric(times[part]) > limit).any() for part, limit in _TIME_LIMITS.items()
+    )
 
 
 def _categorical_or_text(n_non_null: int, cardinality: int) -> SemanticType:
