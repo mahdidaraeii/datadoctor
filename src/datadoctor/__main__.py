@@ -1,5 +1,6 @@
 """Entry point for ``python -m datadoctor``."""
 
-from datadoctor import __version__
+from datadoctor.cli import app
 
-print(f"datadoctor {__version__}")
+if __name__ == "__main__":
+    app()

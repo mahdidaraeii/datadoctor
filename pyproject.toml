@@ -15,7 +15,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
 ]
-dependencies = []
+dependencies = [
+    "typer>=0.27.2",
+]
 
 [tool.hatch.version]
 path = "src/datadoctor/__init__.py"
