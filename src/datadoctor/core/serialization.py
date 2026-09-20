@@ -22,10 +22,12 @@ class JsonSerializable:
     __slots__ = ()
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict of JSON-compatible values."""
         raise NotImplementedError
 
     @classmethod
     def from_dict(cls: type[T], data: dict[str, Any]) -> T:
+        """Rebuild an instance from the dict produced by ``to_dict``."""
         raise NotImplementedError
 
     def to_json(self, *, indent: int | None = 2) -> str:
