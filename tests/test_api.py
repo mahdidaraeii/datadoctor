@@ -9,9 +9,11 @@ import datadoctor
 PUBLIC_API = {
     "AnalysisConfig": "datadoctor.core.config",
     "AnalysisResult": "datadoctor.core.result",
+    "DataDoctorError": "datadoctor.core.exceptions",
     "Dataset": "datadoctor.core.dataset",
     "Finding": "datadoctor.core.result",
     "Severity": "datadoctor.core.result",
+    "load_dataset": "datadoctor.io.loader",
 }
 
 
