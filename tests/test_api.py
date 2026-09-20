@@ -12,6 +12,7 @@ PUBLIC_API = {
     "DataDoctorError": "datadoctor.core.exceptions",
     "Dataset": "datadoctor.core.dataset",
     "Finding": "datadoctor.core.result",
+    "Provenance": "datadoctor.core.provenance",
     "Severity": "datadoctor.core.result",
     "load_dataset": "datadoctor.io.loader",
 }

@@ -3,11 +3,17 @@
 import os
 from pathlib import Path
 
-import pandas as pd
-
+from datadoctor.core.config import AnalysisConfig
 from datadoctor.core.dataset import Dataset
 from datadoctor.core.exceptions import DataLoadError
-from datadoctor.io.readers import read_delimited, read_excel, read_json, read_parquet
+from datadoctor.core.provenance import Provenance
+from datadoctor.io.readers import (
+    ReadResult,
+    read_delimited,
+    read_excel,
+    read_json,
+    read_parquet,
+)
 
 _EXTENSIONS = {
     ".csv": "csv",
@@ -35,6 +41,7 @@ def load_dataset(
     separator: str | None = None,
     encoding: str | None = None,
     sheet: str | int | None = None,
+    config: AnalysisConfig | None = None,
 ) -> Dataset:
     """Read a data file into a ``Dataset``.
 
@@ -60,6 +67,11 @@ def load_dataset(
       with ``reset_index``. It keeps its name, or becomes ``index`` if it had none.
     - Excel: only one sheet is read. A workbook with several sheets requires ``sheet``.
 
+    What the loader changed or could not keep as written is recorded in ``Dataset.provenance``:
+    the literal texts read as missing (``converted_tokens``), empty header cells that were named
+    ``Unnamed: <position>`` (``unnamed_columns``) and a promoted parquet index
+    (``promoted_index``). Rows padded because they were shorter than the header are not recorded.
+
     Args:
         path: The file to read.
         file_format: One of ``"csv"``, ``"tsv"``, ``"parquet"``, ``"excel"`` or ``"json"``.
@@ -70,9 +82,12 @@ def load_dataset(
         encoding: csv, tsv and json only. The file's text encoding, ``"utf-8-sig"`` by default,
             which also accepts a UTF-8 byte order mark.
         sheet: Excel only. The sheet name, or its zero-based position.
+        config: The analysis settings to record in the provenance, ``AnalysisConfig()`` by
+            default. Loading itself does not depend on them.
 
     Returns:
-        A ``Dataset`` named after the file, with ``source`` set to the path as given.
+        A ``Dataset`` named after the file, with ``source`` set to the path as given and a
+        ``provenance`` that includes the SHA-256 of the file.
 
     Raises:
         DataLoadError: The file is missing, has an unknown format, is given an option that does
@@ -97,10 +112,24 @@ def load_dataset(
     if inapplicable:
         raise DataLoadError(f"{file}: {', '.join(inapplicable)} does not apply to {fmt} files")
 
-    frame = _read(fmt, file, separator, encoding, sheet)
-    if frame.empty:
+    read = _read(fmt, file, separator, encoding, sheet)
+    if read.frame.empty:
         raise DataLoadError(f"{file}: the file has no data rows")
-    return Dataset(data=frame, name=file.stem, source=file.as_posix(), target=target)
+    provenance = Provenance.capture(
+        read.frame,
+        config=config,
+        file=file,
+        converted_tokens=read.converted_tokens,
+        unnamed_columns=read.unnamed_columns,
+        promoted_index=read.promoted_index,
+    )
+    return Dataset(
+        data=read.frame,
+        name=file.stem,
+        source=file.as_posix(),
+        target=target,
+        provenance=provenance,
+    )
 
 
 def _resolve_format(file: Path, file_format: str | None) -> str:
@@ -124,7 +153,7 @@ def _read(
     separator: str | None,
     encoding: str | None,
     sheet: str | int | None,
-) -> pd.DataFrame:
+) -> ReadResult:
     encoding = "utf-8-sig" if encoding is None else encoding
     if fmt == "csv":
         return read_delimited(

@@ -9,8 +9,9 @@ import json
 import warnings
 import zipfile
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
 
@@ -19,7 +20,21 @@ from datadoctor.core.exceptions import DataLoadError
 _COMMON_DELIMITERS = ",;\t|"
 
 
-def read_delimited(file: Path, *, separator: str, encoding: str) -> pd.DataFrame:
+class ReadResult(NamedTuple):
+    """A frame, and what the reader changed or could not keep exactly as written.
+
+    ``converted_tokens`` maps a column to the literal cell texts read as missing, with counts.
+    ``unnamed_columns`` are columns whose empty header cell was named ``Unnamed: <position>``.
+    ``promoted_index`` are columns created from a stored index.
+    """
+
+    frame: pd.DataFrame
+    converted_tokens: dict[str, dict[str, int]]
+    unnamed_columns: tuple[str, ...]
+    promoted_index: tuple[str, ...]
+
+
+def read_delimited(file: Path, *, separator: str, encoding: str) -> ReadResult:
     """Read a csv or tsv file."""
     if len(separator) != 1:
         raise DataLoadError(f"separator must be a single character, got {separator!r}")
@@ -31,10 +46,15 @@ def read_delimited(file: Path, *, separator: str, encoding: str) -> pd.DataFrame
 
     frame = _read_frame(file, separator, encoding)
     _check_separator(file, frame, separator)
-    return frame
+    tokens = _converted_tokens(
+        frame, lambda positions: _read_frame(file, separator, encoding, raw_positions=positions)
+    )
+    pairs = zip(frame.columns, header, strict=False)
+    unnamed = tuple(str(column) for column, name in pairs if name == "")
+    return ReadResult(frame, tokens, unnamed, ())
 
 
-def read_json(file: Path, *, encoding: str) -> pd.DataFrame:
+def read_json(file: Path, *, encoding: str) -> ReadResult:
     """Read a json file holding an array of objects.
 
     The stdlib parser is used, not ``pd.read_json``, because pandas converts numeric strings to
@@ -53,10 +73,10 @@ def read_json(file: Path, *, encoding: str) -> pd.DataFrame:
     for position, record in enumerate(data):
         if not isinstance(record, dict):
             raise DataLoadError(f"{file}: element {position} of the array is not an object")
-    return pd.DataFrame(data)
+    return ReadResult(pd.DataFrame(data), {}, (), ())
 
 
-def read_parquet(file: Path) -> pd.DataFrame:
+def read_parquet(file: Path) -> ReadResult:
     """Read a parquet file. A stored index that is not a plain row range becomes columns."""
     try:
         frame = pd.read_parquet(file, engine="pyarrow")
@@ -65,17 +85,20 @@ def read_parquet(file: Path) -> pd.DataFrame:
     except (ValueError, OSError) as exc:
         raise DataLoadError(f"{file}: could not read the file as parquet: {exc}") from exc
 
+    promoted: tuple[str, ...] = ()
     if not isinstance(frame.index, pd.RangeIndex):
+        stored = set(frame.columns)
         try:
             frame = frame.reset_index()
         except ValueError as exc:
             raise DataLoadError(
                 f"{file}: the stored index cannot be turned into a column: {exc}"
             ) from exc
-    return frame
+        promoted = tuple(str(column) for column in frame.columns if column not in stored)
+    return ReadResult(frame, {}, (), promoted)
 
 
-def read_excel(file: Path, *, sheet: str | int | None) -> pd.DataFrame:
+def read_excel(file: Path, *, sheet: str | int | None) -> ReadResult:
     """Read one sheet of an xlsx workbook. Several sheets require an explicit choice."""
     try:
         workbook = pd.ExcelFile(file, engine="openpyxl")
@@ -89,8 +112,19 @@ def read_excel(file: Path, *, sheet: str | int | None) -> pd.DataFrame:
         header = workbook.parse(name, header=None, nrows=1)
         if header.empty:
             raise DataLoadError(f"{file}: sheet {name!r} is empty")
-        _reject_duplicates(file, header.iloc[0].tolist())
-        return workbook.parse(name)
+        names = header.iloc[0].tolist()
+        _reject_duplicates(file, names)
+
+        frame = workbook.parse(name)
+        tokens = _converted_tokens(
+            frame,
+            lambda positions: workbook.parse(
+                name, usecols=positions, dtype=str, keep_default_na=False, na_filter=False
+            ),
+        )
+        pairs = zip(frame.columns, names, strict=False)
+        unnamed = tuple(str(column) for column, value in pairs if pd.isna(value))
+        return ReadResult(frame, tokens, unnamed, ())
 
 
 def _select_sheet(file: Path, names: list[str], sheet: str | int | None) -> str:
@@ -132,10 +166,50 @@ def _read_header(file: Path, separator: str, encoding: str) -> list[str]:
         raise _decode_error(file, encoding, exc) from exc
 
 
-def _read_frame(file: Path, separator: str, encoding: str) -> pd.DataFrame:
+def _converted_tokens(
+    frame: pd.DataFrame, read_raw: Callable[[list[int]], pd.DataFrame]
+) -> dict[str, dict[str, int]]:
+    """Count the literal texts that pandas read as missing, per column.
+
+    The file is read again, only for the columns that have missing values, with no missing-value
+    conversion at all. A cell that is missing in ``frame`` but not empty in that raw read was
+    converted from a literal token. Comparing against what pandas actually did, and not against a
+    list of tokens, stays right if pandas changes its defaults. Columns are matched by position
+    because labels can be numbers, which pandas would treat as positions anyway.
+    """
+    positions = [i for i in range(frame.shape[1]) if frame.iloc[:, i].isna().any()]
+    if not positions:
+        return {}
+    raw = read_raw(positions)
+    found: dict[str, dict[str, int]] = {}
+    for offset, position in enumerate(positions):
+        literal = raw.iloc[:, offset]
+        hits = literal[frame.iloc[:, position].isna() & literal.ne("")]
+        if not hits.empty:
+            counts = hits.value_counts().items()
+            found[str(frame.columns[position])] = {
+                str(token): int(count) for token, count in sorted(counts)
+            }
+    return found
+
+
+def _read_frame(
+    file: Path, separator: str, encoding: str, *, raw_positions: list[int] | None = None
+) -> pd.DataFrame:
     # index_col=False stops pandas from silently promoting the first column to the index when
     # rows are longer than the header. It then truncates those rows and emits a ParserWarning,
     # which is turned into an error so that no data is lost quietly.
+    # raw_positions selects columns to read as untouched text, for counting converted tokens.
+    raw = (
+        {}
+        if raw_positions is None
+        else {
+            "usecols": raw_positions,
+            "dtype": str,
+            "keep_default_na": False,
+            "na_filter": False,
+        }
+    )
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", pd.errors.ParserWarning)
@@ -145,6 +219,7 @@ def _read_frame(file: Path, separator: str, encoding: str) -> pd.DataFrame:
                 encoding=encoding,
                 index_col=False,
                 low_memory=False,
+                **raw,
             )
     except UnicodeDecodeError as exc:
         raise _decode_error(file, encoding, exc) from exc

@@ -2,8 +2,9 @@
 
 The public API is these names:
 
-- ``load_dataset``: read a csv file into a ``Dataset``.
+- ``load_dataset``: read a data file into a ``Dataset``.
 - ``Dataset``: a dataframe plus metadata such as its name, source and target column.
+- ``Provenance``: how a dataset was obtained, including the file hash and package versions.
 - ``AnalysisConfig``: settings for a run, including the random seed and size thresholds.
 - ``AnalysisResult``: what an analysis produced (findings, metrics and saved files).
 - ``Finding``: one diagnostic, with separate evidence, interpretation and limitations.
@@ -16,6 +17,7 @@ Results serialize to strict JSON with ``to_json`` and ``from_json``.
 from datadoctor.core.config import AnalysisConfig
 from datadoctor.core.dataset import Dataset
 from datadoctor.core.exceptions import DataDoctorError
+from datadoctor.core.provenance import Provenance
 from datadoctor.core.result import AnalysisResult, Finding, Severity
 from datadoctor.io.loader import load_dataset
 
@@ -27,6 +29,7 @@ __all__ = [
     "DataDoctorError",
     "Dataset",
     "Finding",
+    "Provenance",
     "Severity",
     "load_dataset",
 ]
