@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "score": 91.5,
+    "city": "Oslo",
+    "active": true
+  },
+  {
+    "id": 2,
+    "score": null,
+    "city": "Zürich",
+    "active": false
+  },
+  {
+    "id": 3,
+    "score": 78.0,
+    "city": "Paris",
+    "active": true
+  },
+  {
+    "id": 4,
+    "score": 88.25,
+    "city": "Rome",
+    "active": true
+  }
+]

@@ -1,0 +1,5 @@
+id,score,city,active
+1,91.5,Oslo,True
+2,,Zürich,False
+3,78.0,Paris,True
+4,88.25,Rome,True
