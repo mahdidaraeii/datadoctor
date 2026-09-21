@@ -37,6 +37,9 @@ _ISO_8601 = re.compile(
     r"(?:[T ](?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2})(?:\.\d+)?)?"
     r"(?:Z|[+-](?P<offset_hour>\d{2}):?(?P<offset_minute>\d{2}))?)?"
 )
+_DATE_LENGTH = len("2024-01-05")
+# How many values are tested first when deciding whether a text column holds dates.
+_PROBE = 1000
 # The largest value each clock part of an ISO 8601 text can have. A second of 60 is rejected too.
 _TIME_LIMITS = {"hour": 23, "minute": 59, "second": 59, "offset_hour": 23, "offset_minute": 59}
 
@@ -160,18 +163,29 @@ def _try_cardinality(non_null: pd.Series) -> int | None:
 
 
 def _is_iso_8601(non_null: pd.Series) -> bool:
+    # A column that is plainly not dates is settled by its first values, which spares finding
+    # the distinct values of a large text column. One miss settles it, so this is exact.
+    if not non_null.iloc[:_PROBE].str.fullmatch(_ISO_8601).all():
+        return False
+    # Dates repeat far more than they are unique, so every check runs on the distinct values.
+    # Whether all values pass is the same as whether all distinct values pass.
+    values = non_null.drop_duplicates()
     # The pattern gate comes first because a parser alone accepts year-like text such as "1234".
-    if not non_null.str.fullmatch(_ISO_8601).all():
+    if not values.str.fullmatch(_ISO_8601).all():
         return False
     # The date and the time are checked here and not with pandas. pandas 2.x holds dates as
     # datetime64[ns] and turns anything outside roughly 1677 to 2262, such as 9999-12-31 or
     # 0001-01-01, into NaT, so the same column would be typed differently on pandas 2.x and 3.x.
     # numpy's day-resolution dates cover every year and reject dates that do not exist.
     try:
-        np.array(non_null.str[:10], dtype="datetime64[D]")
+        np.array(values.str[:10], dtype="datetime64[D]")
     except ValueError:
         return False
-    times = non_null.str.extract(_ISO_8601)
+    # A value of 10 characters is a date alone and has no time to check.
+    timed = values[values.str.len() > _DATE_LENGTH]
+    if timed.empty:
+        return True
+    times = timed.str.extract(_ISO_8601)
     return not any(
         (pd.to_numeric(times[part]) > limit).any() for part, limit in _TIME_LIMITS.items()
     )

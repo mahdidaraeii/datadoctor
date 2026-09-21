@@ -251,6 +251,7 @@ class TestIsoTextDates:
         [
             "2024-02-30",  # not a calendar date
             "2024-13-01",  # month 13
+            "2024-01-05T24:00",  # hour 24, the shortest form with a time
             "2024-01-05T24:00:00",  # hour 24
             "2024-01-05T10:60:00",  # minute 60
             "2024-01-05T10:30:60",  # second 60
@@ -263,6 +264,20 @@ class TestIsoTextDates:
         values = ["2024-01-05"] * 29 + [bad]
 
         assert type_of(values) == "categorical"
+
+    def test_a_value_that_is_not_shaped_like_a_date_is_found_after_the_first_thousand(self):
+        # numpy reads a bare year as a date, so only the pattern gate can reject this value.
+        values = ["2024-01-05"] * 1500 + ["1234"]
+
+        assert type_of(values) == "categorical"
+
+    @pytest.mark.parametrize("bad", ["2024-02-30", "2024-01-05T24:00:00"])
+    def test_a_bad_value_is_found_behind_many_distinct_good_ones_that_repeat(self, bad):
+        good = [f"2024-01-{1 + k % 28:02d}T{k % 24:02d}:30:00" for k in range(60)]
+        values = good * 2 + [bad]
+
+        assert type_of(good * 2) == "datetime"
+        assert type_of(values) != "datetime"
 
 
 def test_semantic_type_values_are_the_documented_words():
