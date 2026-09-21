@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from datadoctor.core.config import AnalysisConfig
@@ -29,6 +31,24 @@ class TestConstruction:
     def test_positional_construction_is_rejected(self):
         with pytest.raises(TypeError):
             AnalysisConfig(1, 2, 3)
+
+
+class TestOutputDir:
+    def test_the_default_is_a_relative_outputs_directory(self):
+        assert AnalysisConfig().output_dir == Path("outputs")
+
+    def test_a_string_and_a_path_mean_the_same_and_are_stored_as_a_path(self, tmp_path):
+        assert AnalysisConfig(output_dir="plots") == AnalysisConfig(output_dir=Path("plots"))
+        assert AnalysisConfig(output_dir=str(tmp_path)).output_dir == tmp_path
+
+    def test_an_empty_string_is_rejected(self):
+        with pytest.raises(ConfigError, match="output_dir"):
+            AnalysisConfig(output_dir="  ")
+
+    @pytest.mark.parametrize("value", [5, None, ["plots"], True])
+    def test_other_types_are_rejected(self, value):
+        with pytest.raises(TypeError, match="output_dir"):
+            AnalysisConfig(output_dir=value)
 
 
 class TestValidation:
@@ -65,7 +85,20 @@ class TestSerialization:
             "random_seed",
             "row_threshold",
             "column_threshold",
+            "output_dir",
         }
+
+    def test_the_output_directory_is_stored_as_text_with_forward_slashes(self):
+        config = AnalysisConfig(output_dir=Path("results") / "plots")
+
+        assert config.to_dict()["output_dir"] == "results/plots"
+        assert AnalysisConfig.from_json(config.to_json()) == config
+
+    def test_a_record_saved_before_output_dir_existed_still_loads(self):
+        saved = AnalysisConfig().to_dict()
+        del saved["output_dir"]
+
+        assert AnalysisConfig.from_dict(saved).output_dir == Path("outputs")
 
     def test_missing_keys_fall_back_to_defaults(self):
         assert AnalysisConfig.from_dict({"random_seed": 3}) == AnalysisConfig(random_seed=3)
