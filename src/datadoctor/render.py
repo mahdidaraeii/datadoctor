@@ -3,14 +3,22 @@
 Formatting only. Every number shown here was produced by the engine; nothing is computed.
 """
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.table import Table
+from rich.text import Text
 
 from datadoctor.core.dataset import Dataset
 from datadoctor.core.provenance import Provenance
-from datadoctor.core.result import AnalysisResult
+from datadoctor.core.result import AnalysisResult, Finding, Severity
 
 _SHA_SHOWN = 16
+_SEVERITY_STYLE = {
+    Severity.CRITICAL: "bold white on red",
+    Severity.HIGH: "bold red",
+    Severity.MEDIUM: "bold yellow",
+    Severity.LOW: "bold cyan",
+    Severity.INFO: "bold blue",
+}
 
 
 def render_profile(console: Console, dataset: Dataset, result: AnalysisResult) -> None:
@@ -18,6 +26,67 @@ def render_profile(console: Console, dataset: Dataset, result: AnalysisResult) -
     console.print(_provenance_table(dataset, dataset.provenance))
     console.print()
     console.print(_schema_table(result))
+
+
+def render_quality(console: Console, dataset: Dataset, result: AnalysisResult) -> None:
+    """Print the findings of a quality run, most severe first, with the settings they ran under.
+
+    Text is printed as text, never as markup, because column names and messages can contain
+    square brackets.
+    """
+    rows, columns = dataset.data.shape
+    metrics = result.metrics
+    counts = [
+        f"{count} {severity}"
+        for severity, count in metrics["findings_by_severity"].items()
+        if count
+    ]
+    console.print(Text(f"Quality: {dataset.name} ({rows} rows, {columns} columns)", style="bold"))
+    console.print(Text(f"Settings: {_settings(result)}"))
+    console.print()
+    if not result.findings:
+        checks = ", ".join(metrics["checks_run"])
+        console.print(Text(f"No findings from: {checks}."))
+        console.print(Text("This means these checks found nothing at their thresholds."))
+        console.print(Text("It does not show that the data is clean."))
+        return
+    console.print(Text(f"Findings: {len(result.findings)} ({', '.join(counts)})"))
+    for finding in result.findings:
+        console.print()
+        console.print(_finding_block(finding))
+
+
+def _settings(result: AnalysisResult) -> str:
+    config = result.config
+    as_of = result.metrics["impossible_values"]["as_of"]
+    return (
+        f"seed {config.random_seed}, row threshold {config.row_threshold}, "
+        f"column threshold {config.column_threshold}, dates after {as_of} count as future"
+    )
+
+
+def _finding_block(finding: Finding) -> Group:
+    head = Text.assemble(
+        (f" {finding.severity.value.upper()} ", _SEVERITY_STYLE[finding.severity]),
+        " ",
+        (finding.title, "bold"),
+        f"  confidence {finding.confidence}",
+    )
+    # A grid gives every field a hanging indent, so long text wraps under its own label.
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(no_wrap=True)
+    grid.add_column(overflow="fold")
+    fields = [
+        ("Columns", ", ".join(finding.affected_columns)),
+        ("Evidence", finding.evidence),
+        ("Interpretation", finding.interpretation),
+        ("Limitations", finding.limitations),
+        ("Recommendation", finding.recommendation),
+    ]
+    for label, value in fields:
+        if value:
+            grid.add_row(Text(f"  {label}:", style="dim"), Text(value))
+    return Group(head, grid)
 
 
 def _provenance_table(dataset: Dataset, provenance: Provenance) -> Table:
