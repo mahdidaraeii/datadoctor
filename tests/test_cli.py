@@ -353,7 +353,7 @@ class TestQualityOutput:
         assert result.exit_code == 0
         assert (
             "No findings from: missingness, duplicates, constants, outliers, dtypes, "
-            "impossible_values."
+            "impossible_values, privacy."
         ) in result.output
         assert "It does not show that the data is clean." in result.output
         assert "Findings:" not in result.output
@@ -393,6 +393,34 @@ class TestQualityFlagsReachTheLoader:
 
         assert run("quality", workbook).exit_code == 1
         assert run("quality", workbook, "--sheet", "second").exit_code == 0
+
+
+class TestPrivacyInQuality:
+    def emails_csv(self, tmp_path):
+        lines = ["id,contact,score"]
+        lines += [f"{k},user{k}@example.com,{k % 7}" for k in range(60)]
+        path = tmp_path / "people.csv"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+        return path
+
+    def test_a_privacy_finding_is_printed_with_its_evidence_and_never_the_values(self, tmp_path):
+        output = run("quality", self.emails_csv(tmp_path)).output
+
+        assert "Email addresses found in columns" in output
+        assert "Columns:        contact" in output
+        assert "To confirm" in output
+        assert "user5@example.com" not in output
+        assert "example.com" not in output
+
+    def test_the_json_file_carries_the_privacy_metrics_without_the_values(self, tmp_path):
+        out = tmp_path / "quality.json"
+        run("quality", self.emails_csv(tmp_path), "--json", out)
+
+        text = out.read_text(encoding="utf-8")
+        quality = json.loads(text)["quality"]
+
+        assert quality["metrics"]["privacy"]["columns"][0]["name"] == "contact"
+        assert "user5@example.com" not in text
 
 
 class TestAsOf:

@@ -6,6 +6,7 @@ import pytest
 
 from datadoctor import AnalysisConfig, AnalysisResult, Dataset, Severity
 from datadoctor.core.exceptions import DatasetError
+from datadoctor.privacy import check_pii
 from datadoctor.quality import (
     check_constants,
     check_dtypes,
@@ -26,6 +27,7 @@ CHECKS = [
     "outliers",
     "dtypes",
     "impossible_values",
+    "privacy",
 ]
 
 
@@ -59,6 +61,7 @@ def planted_frame() -> pd.DataFrame:
     frame["flag"] = "same"  # constants: one value everywhere
     frame["visit"] = "2024-03-01"
     frame.loc[[12, 13], "visit"] = "2999-01-01"  # impossible values: dates in the future
+    frame["contact"] = [f"user{k}@example.com" for k in range(N)]  # privacy: email addresses
     return pd.concat([frame, frame.iloc[:12]], ignore_index=True)  # duplicates: 12 copied rows
 
 
@@ -72,6 +75,7 @@ PLANTED = {
     ("dtypes", ("units",)),
     ("impossible_values", ("age",)),
     ("impossible_values", ("visit",)),
+    ("privacy", ("contact",)),
 }
 
 
@@ -95,6 +99,23 @@ class TestPlantedDefects:
         )
 
 
+class TestPrivacy:
+    def test_the_privacy_finding_keeps_its_category_and_no_value_reaches_the_merged_result(self):
+        result = run(planted_frame())
+
+        privacy = [f for f in result.findings if f.category == "privacy"]
+        assert [(f.title, f.affected_columns) for f in privacy] == [
+            ("Email addresses found in columns", ("contact",))
+        ]
+        assert "user5@example.com" not in result.to_json()
+
+    def test_a_row_sample_is_reported_once_although_two_analyzers_report_it(self):
+        result = run(planted_frame(), config=AnalysisConfig(row_threshold=100))
+
+        titles = [f.title for f in result.findings if f.category == "guardrail"]
+        assert titles == ["Analysis ran on a sample of the rows"]
+
+
 class TestOrder:
     def test_findings_run_from_most_to_least_severe_and_ties_keep_the_analyzer_order(self):
         result = run(planted_frame(), target="income")
@@ -107,6 +128,7 @@ class TestOrder:
             ("medium", "dtypes"),
             ("medium", "impossible_values"),
             ("medium", "impossible_values"),
+            ("medium", "privacy"),
             ("low", "constants"),
             ("info", "constants"),
         ]
@@ -118,7 +140,7 @@ class TestMetrics:
 
         by_severity = result.metrics["findings_by_severity"]
         assert list(by_severity) == ["critical", "high", "medium", "low", "info"]
-        assert by_severity == {"critical": 0, "high": 1, "medium": 6, "low": 1, "info": 1}
+        assert by_severity == {"critical": 0, "high": 1, "medium": 7, "low": 1, "info": 1}
         assert sum(by_severity.values()) == len(result.findings)
 
     def test_each_analyzer_keeps_its_own_metrics_under_its_own_name(self):
@@ -132,6 +154,7 @@ class TestMetrics:
             "outliers": check_outliers(dataset, CONFIG),
             "dtypes": check_dtypes(dataset, CONFIG),
             "impossible_values": check_impossible_values(dataset, CONFIG, as_of=AS_OF),
+            "privacy": check_pii(dataset, CONFIG),
         }
         assert {name: result.metrics[name] for name in CHECKS} == {
             name: analysis.metrics for name, analysis in alone.items()
