@@ -1,6 +1,7 @@
 """Load a dataset from a file."""
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 from datadoctor.core.config import AnalysisConfig
@@ -25,11 +26,11 @@ _EXTENSIONS = {
 
 # The options each format accepts. Passing any other option is an error, never ignored.
 _OPTIONS = {
-    "csv": {"separator", "encoding"},
-    "tsv": {"encoding"},
+    "csv": {"separator", "encoding", "text_columns"},
+    "tsv": {"encoding", "text_columns"},
     "json": {"encoding"},
     "parquet": set(),
-    "excel": {"sheet"},
+    "excel": {"sheet", "text_columns"},
 }
 
 
@@ -41,6 +42,7 @@ def load_dataset(
     separator: str | None = None,
     encoding: str | None = None,
     sheet: str | int | None = None,
+    text_columns: Sequence[str] | None = None,
     config: AnalysisConfig | None = None,
 ) -> Dataset:
     """Read a data file into a ``Dataset``.
@@ -87,6 +89,10 @@ def load_dataset(
         encoding: csv, tsv and json only. The file's text encoding, ``"utf-8-sig"`` by default,
             which also accepts a UTF-8 byte order mark.
         sheet: Excel only. The sheet name, or its zero-based position.
+        text_columns: csv, tsv and Excel only. Names of columns to read as text instead of
+            inferring their type, so that codes such as ``01234`` keep their leading zeros. An
+            empty header cell can be named ``Unnamed: <position>``. The usual missing-value
+            tokens are still read as missing. The request is recorded in the provenance.
         config: The analysis settings to record in the provenance, ``AnalysisConfig()`` by
             default. Loading itself does not depend on them.
 
@@ -97,8 +103,9 @@ def load_dataset(
     Raises:
         DataLoadError: The file is missing, has an unknown format, is given an option that does
             not apply to its format, is empty or has no data rows, cannot be decoded or parsed,
-            has duplicate column names, or violates a rule of its format (see above and the
-            error message).
+            has duplicate column names, is asked to keep a column as text that it does not have,
+            or violates a rule of its format (see above and the error message).
+        TypeError: ``text_columns`` is a single string or holds something other than strings.
         DatasetError: ``target`` is not a column of the file.
     """
     file = Path(path)
@@ -107,17 +114,23 @@ def load_dataset(
     if not file.is_file():
         raise DataLoadError(f"not a file: {file}")
 
+    requested = _requested_text_columns(text_columns)
     fmt = _resolve_format(file, file_format)
     given = {
         name
-        for name, value in (("separator", separator), ("encoding", encoding), ("sheet", sheet))
+        for name, value in (
+            ("separator", separator),
+            ("encoding", encoding),
+            ("sheet", sheet),
+            ("text_columns", requested or None),
+        )
         if value is not None
     }
     inapplicable = sorted(given - _OPTIONS[fmt])
     if inapplicable:
         raise DataLoadError(f"{file}: {', '.join(inapplicable)} does not apply to {fmt} files")
 
-    read = _read(fmt, file, separator, encoding, sheet)
+    read = _read(fmt, file, separator, encoding, sheet, requested)
     if read.frame.empty:
         raise DataLoadError(f"{file}: the file has no data rows")
     provenance = Provenance.capture(
@@ -128,6 +141,7 @@ def load_dataset(
         unnamed_columns=read.unnamed_columns,
         promoted_index=read.promoted_index,
         leading_zeros=read.leading_zeros,
+        text_columns=requested,
     )
     return Dataset(
         data=read.frame,
@@ -136,6 +150,14 @@ def load_dataset(
         target=target,
         provenance=provenance,
     )
+
+
+def _requested_text_columns(text_columns: Sequence[str] | None) -> tuple[str, ...]:
+    if text_columns is None:
+        return ()
+    if isinstance(text_columns, str) or not all(isinstance(name, str) for name in text_columns):
+        raise TypeError("text_columns must be a sequence of column names, not a single string")
+    return tuple(dict.fromkeys(text_columns))
 
 
 def _resolve_format(file: Path, file_format: str | None) -> str:
@@ -159,16 +181,20 @@ def _read(
     separator: str | None,
     encoding: str | None,
     sheet: str | int | None,
+    text_columns: tuple[str, ...],
 ) -> ReadResult:
     encoding = "utf-8-sig" if encoding is None else encoding
     if fmt == "csv":
         return read_delimited(
-            file, separator="," if separator is None else separator, encoding=encoding
+            file,
+            separator="," if separator is None else separator,
+            encoding=encoding,
+            text_columns=text_columns,
         )
     if fmt == "tsv":
-        return read_delimited(file, separator="\t", encoding=encoding)
+        return read_delimited(file, separator="\t", encoding=encoding, text_columns=text_columns)
     if fmt == "json":
         return read_json(file, encoding=encoding)
     if fmt == "parquet":
         return read_parquet(file)
-    return read_excel(file, sheet=sheet)
+    return read_excel(file, sheet=sheet, text_columns=text_columns)

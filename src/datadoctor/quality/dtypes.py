@@ -48,7 +48,11 @@ def check_dtypes(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
     as the number 1234. The loader records such columns in ``dataset.provenance.leading_zeros``,
     from the file's own text, and each is reported here as a separate finding, because the zeros
     are already gone from the data. A column that is text in the frame is never reported this
-    way, only as numeric-looking codes above.
+    way, only as numeric-looking codes above. The finding recommends the ``text_columns`` option
+    of ``load_dataset``.
+
+    A column listed in ``dataset.provenance.text_columns`` was kept as text on request, so it is
+    left out of the numbers-as-text and numeric-looking-codes checks.
 
     **Mixed types.** An object column whose non-null values are of more than one Python type, for
     example integers and strings from an Excel sheet or a JSON file. The finding gives the exact
@@ -70,13 +74,16 @@ def check_dtypes(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
     if n_rows == 0:
         raise DatasetError("cannot check column types in a dataset with no rows")
 
+    # Columns the caller asked to keep as text are not reported as numbers stored as text: that was
+    # their choice, and the advice to convert them would contradict it.
+    requested = set(dataset.provenance.text_columns)
     reported = []
     for position in range(n_columns):
         series = frame.iloc[:, position]
         values = series.dropna()
         kind = pt.infer_dtype(values, skipna=True)
         entry = None
-        if kind == "string":
+        if kind == "string" and str(frame.columns[position]) not in requested:
             entry = _numbers_as_text(str(frame.columns[position]), values)
         elif kind in _MIXED_KINDS:
             entry = _mixed_types(str(frame.columns[position]), values)

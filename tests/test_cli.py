@@ -68,6 +68,7 @@ class TestProfileTables:
         for note in (
             "Read as missing",
             "Leading zeros dropped",
+            "Kept as text",
             "Unnamed columns",
             "Promoted index",
         ):
@@ -84,9 +85,12 @@ class TestProfileTables:
 
 
 def zips_csv(tmp_path):
-    """40 rows of a zero-padded code, read as numbers, and a plain number."""
+    """40 rows of a zero-padded code, read as numbers, and a plain number that repeats, so that
+    it is neither an identifier nor a cause of repeated rows."""
     lines = ["zip,amount"]
-    lines += [f"{['01234', '56789', '00042', '90210'][k % 4]},{100 + k}" for k in range(40)]
+    lines += [
+        f"{['01234', '56789', '00042', '90210'][k % 4]},{100 + k * 7 % 13}" for k in range(40)
+    ]
     path = tmp_path / "zips.csv"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
     return path
@@ -122,6 +126,59 @@ class TestLeadingZerosLostAtLoad:
         provenance = Provenance.from_dict(json.loads(out.read_text(encoding="utf-8"))["provenance"])
 
         assert provenance.leading_zeros == {"zip": {"values": 20, "checked": 40, "width": 5}}
+
+
+class TestTextColumnFlag:
+    def test_profile_reads_the_column_as_text_and_says_so(self, tmp_path):
+        output = run("profile", zips_csv(tmp_path), "--text-column", "zip").output
+
+        assert table_row(output, "Kept as text")[1] == "zip"
+        assert table_row(output, "Leading zeros dropped")[1] == "none"
+        assert table_row(output, "zip")[2] == "categorical"
+
+    def test_the_flag_can_be_repeated(self, tmp_path):
+        path = zips_csv(tmp_path)
+
+        output = run("profile", path, "--text-column", "zip", "--text-column", "amount").output
+
+        assert table_row(output, "Kept as text")[1] == "zip, amount"
+        assert table_row(output, "amount")[2] == "categorical"
+
+    def test_quality_has_nothing_to_report_once_the_column_is_text(self, tmp_path):
+        path = zips_csv(tmp_path)
+
+        with_flag = run("quality", path, "--text-column", "zip")
+
+        assert "No findings from:" in with_flag.output
+        assert "Leading zeros were lost" in run("quality", path).output
+
+    def test_the_finding_points_to_the_flag(self, tmp_path):
+        output = run("quality", zips_csv(tmp_path)).output
+
+        assert "--text-column zip" in output
+
+    def test_the_request_is_in_the_json_provenance(self, tmp_path):
+        out = tmp_path / "quality.json"
+        run("quality", zips_csv(tmp_path), "--text-column", "zip", "--json", out)
+
+        provenance = Provenance.from_dict(json.loads(out.read_text(encoding="utf-8"))["provenance"])
+
+        assert provenance.text_columns == ("zip",)
+
+    def test_a_column_the_file_does_not_have_is_a_clean_error(self, tmp_path):
+        for command in ("profile", "quality"):
+            result = run(command, zips_csv(tmp_path), "--text-column", "nope")
+
+            assert result.exit_code == 1
+            assert "error: " in result.output
+            assert "no column named 'nope'" in result.output
+            assert "Traceback" not in result.output
+
+    def test_a_format_that_already_keeps_text_rejects_it(self):
+        result = run("profile", FIXTURES / "sample.json", "--text-column", "id")
+
+        assert result.exit_code == 1
+        assert "text_columns does not apply to json files" in result.output
 
 
 class TestJsonFile:

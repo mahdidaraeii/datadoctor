@@ -3,6 +3,9 @@
 Only placeholder-like tokens are shown, never the values of a column that parses as numbers.
 """
 
+import json
+import shlex
+
 from datadoctor.core.result import Finding, Severity
 
 # How many columns a finding spells out. The rest are counted, and all are in the metrics.
@@ -130,6 +133,8 @@ def lost_zeros_finding(columns: list[dict], n_rows: int) -> Finding:
     """Columns that were read as numbers although their values had leading zeros in the file."""
     ranked = sorted(columns, key=lambda c: (-c["leading_zero"], c["name"]))
     shown = [_describe_lost_zeros(c, n_rows) for c in ranked[:LISTED]]
+    names = [c["name"] for c in ranked[:LISTED]]
+    flags = " ".join(f"--text-column {shlex.quote(name)}" for name in names)
     return Finding(
         category="dtypes",
         severity=Severity.MEDIUM,
@@ -158,10 +163,9 @@ def lost_zeros_finding(columns: list[dict], n_rows: int) -> Finding:
         ),
         affected_columns=tuple(c["name"] for c in columns),
         recommendation=(
-            "Read these columns as text, for example with pandas.read_csv and dtype=str for the "
-            "column, and give the frame to Dataset. If every value had the same width, as "
-            "recorded above, padding the loaded numbers to that width with zfill restores the "
-            "codes. Nothing was converted here."
+            f"Keep these columns as text: pass text_columns={json.dumps(names)} to load_dataset, "
+            f"or {flags} on the command line. The file itself is unchanged."
+            + _more(len(columns), len(names))
         ),
     )
 

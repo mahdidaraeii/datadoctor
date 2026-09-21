@@ -106,6 +106,7 @@ def _provenance_table(dataset: Dataset, provenance: Provenance) -> Table:
     table.add_row("Config", _config(provenance))
     table.add_row("Read as missing", _converted_tokens(provenance))
     table.add_row("Leading zeros dropped", _leading_zeros(provenance))
+    table.add_row("Kept as text", ", ".join(provenance.text_columns) or "none")
     table.add_row("Unnamed columns", ", ".join(provenance.unnamed_columns) or "none")
     table.add_row("Promoted index", ", ".join(provenance.promoted_index) or "none")
     return table

@@ -28,6 +28,7 @@ _OPTIONAL = (
     "unnamed_columns",
     "promoted_index",
     "leading_zeros",
+    "text_columns",
 )
 
 
@@ -59,6 +60,8 @@ class Provenance(JsonSerializable):
             zero among the first ``checked`` rows, and ``width`` is the length of every
             non-empty value there when they were all the same length, which is typical of codes.
             Only csv, tsv and Excel files are checked, and only whole, non-negative columns.
+        text_columns: Columns the caller asked to keep as text, in the order requested. Their
+            values were not converted to numbers, so codes keep their leading zeros.
     """
 
     file_sha256: str | None = None
@@ -73,6 +76,7 @@ class Provenance(JsonSerializable):
     unnamed_columns: tuple[str, ...] = ()
     promoted_index: tuple[str, ...] = ()
     leading_zeros: dict[str, dict[str, int]] = field(default_factory=dict)
+    text_columns: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "shape", tuple(self.shape))
@@ -88,6 +92,7 @@ class Provenance(JsonSerializable):
         )
         object.__setattr__(self, "unnamed_columns", tuple(self.unnamed_columns))
         object.__setattr__(self, "promoted_index", tuple(self.promoted_index))
+        object.__setattr__(self, "text_columns", tuple(self.text_columns))
 
     @classmethod
     def capture(
@@ -100,6 +105,7 @@ class Provenance(JsonSerializable):
         unnamed_columns: tuple[str, ...] = (),
         promoted_index: tuple[str, ...] = (),
         leading_zeros: dict[str, dict[str, int]] | None = None,
+        text_columns: tuple[str, ...] = (),
     ) -> "Provenance":
         """Record the current conditions for a loaded frame, hashing ``file`` if there is one."""
         from datadoctor import __version__
@@ -120,6 +126,7 @@ class Provenance(JsonSerializable):
             unnamed_columns=unnamed_columns,
             promoted_index=promoted_index,
             leading_zeros={} if leading_zeros is None else leading_zeros,
+            text_columns=text_columns,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -138,6 +145,7 @@ class Provenance(JsonSerializable):
             "unnamed_columns": list(self.unnamed_columns),
             "promoted_index": list(self.promoted_index),
             "leading_zeros": {column: dict(entry) for column, entry in self.leading_zeros.items()},
+            "text_columns": list(self.text_columns),
         }
 
     @classmethod

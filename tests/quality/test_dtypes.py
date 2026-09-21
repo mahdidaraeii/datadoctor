@@ -146,6 +146,8 @@ class TestLeadingZerosLostAtLoad:
         assert lost.affected_columns == ("zip",)
         assert "zip (30 of the 60 rows; every value was 5 characters wide)" in lost.evidence
         assert "cannot be recovered" in lost.interpretation
+        assert 'text_columns=["zip"]' in lost.recommendation
+        assert "--text-column zip on the command line" in lost.recommendation
         assert column(result, "zip") == {
             "name": "zip",
             "kind": "codes_lost",
@@ -211,6 +213,22 @@ class TestLeadingZerosLostAtLoad:
         assert "zip (3 of the first 100,000 rows)" in lost.evidence
         assert "characters wide" not in lost.evidence
 
+    def test_the_recommendation_names_at_most_five_columns_and_quotes_awkward_names(self):
+        names = ["zip code", "b", "c", "d", "e", "f", "g"]
+        frame = pd.DataFrame({name: [1, 2, 3] for name in names})
+        record = {name: {"values": 9 - i, "checked": 3} for i, name in enumerate(names)}
+        dataset = Dataset(
+            data=frame, name="t", provenance=Provenance.capture(frame, leading_zeros=record)
+        )
+
+        lost = finding(
+            check_dtypes(dataset, CONFIG), "Leading zeros were lost when the file was read"
+        )
+
+        assert "--text-column 'zip code' --text-column b --text-column c" in lost.recommendation
+        assert lost.recommendation.count("--text-column") == 5
+        assert "and 2 more" in lost.recommendation
+
     def test_a_single_row_is_not_pluralized(self):
         frame = pd.DataFrame({"zip": [1234]})
         record = {"zip": {"values": 1, "checked": 1}}
@@ -223,6 +241,31 @@ class TestLeadingZerosLostAtLoad:
         )
 
         assert "zip (1 of the 1 row)" in lost.evidence
+
+
+class TestColumnsKeptAsTextOnRequest:
+    def frames(self):
+        return pd.DataFrame({"zip": [f"{k:05d}" for k in range(100)], "amount": numbers(100)})
+
+    def test_they_are_not_reported_as_numbers_stored_as_text_or_as_codes(self):
+        frame = self.frames()
+        kept = Dataset(
+            data=frame,
+            name="t",
+            provenance=Provenance.capture(frame, text_columns=("zip", "amount")),
+        )
+
+        assert check_dtypes(kept, CONFIG).findings == ()
+        # The same frame without the request is reported, so the request is what silences them.
+        assert kinds(run(frame)) == {"zip": "numeric_codes", "amount": "numbers_as_text"}
+
+    def test_only_the_requested_columns_are_left_out(self):
+        frame = self.frames()
+        kept = Dataset(
+            data=frame, name="t", provenance=Provenance.capture(frame, text_columns=("zip",))
+        )
+
+        assert kinds(check_dtypes(kept, CONFIG)) == {"amount": "numbers_as_text"}
 
 
 class TestMixedTypes:

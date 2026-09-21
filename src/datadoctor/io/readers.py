@@ -38,8 +38,10 @@ class ReadResult(NamedTuple):
     leading_zeros: dict[str, dict[str, int]]
 
 
-def read_delimited(file: Path, *, separator: str, encoding: str) -> ReadResult:
-    """Read a csv or tsv file."""
+def read_delimited(
+    file: Path, *, separator: str, encoding: str, text_columns: tuple[str, ...] = ()
+) -> ReadResult:
+    """Read a csv or tsv file. ``text_columns`` are read as text, not as inferred types."""
     if len(separator) != 1:
         raise DataLoadError(f"separator must be a single character, got {separator!r}")
 
@@ -47,8 +49,10 @@ def read_delimited(file: Path, *, separator: str, encoding: str) -> ReadResult:
     if not header:
         raise DataLoadError(f"{file}: the file is empty")
     _reject_duplicates(file, header)
+    labels = [name or f"Unnamed: {position}" for position, name in enumerate(header)]
+    as_text = _text_dtypes(file, labels, text_columns)
 
-    frame = _read_frame(file, separator, encoding)
+    frame = _read_frame(file, separator, encoding, dtype=as_text)
     _check_separator(file, frame, separator)
     tokens = _converted_tokens(
         frame, lambda positions: _read_frame(file, separator, encoding, raw_positions=positions)
@@ -108,8 +112,14 @@ def read_parquet(file: Path) -> ReadResult:
     return ReadResult(frame, {}, (), promoted, {})
 
 
-def read_excel(file: Path, *, sheet: str | int | None) -> ReadResult:
-    """Read one sheet of an xlsx workbook. Several sheets require an explicit choice."""
+def read_excel(
+    file: Path, *, sheet: str | int | None, text_columns: tuple[str, ...] = ()
+) -> ReadResult:
+    """Read one sheet of an xlsx workbook. Several sheets require an explicit choice.
+
+    ``text_columns`` are read as text, not as inferred types. Without that, pandas turns even
+    cells stored as text, such as ``01234``, into numbers.
+    """
     try:
         workbook = pd.ExcelFile(file, engine="openpyxl")
     except ImportError as exc:
@@ -124,8 +134,10 @@ def read_excel(file: Path, *, sheet: str | int | None) -> ReadResult:
             raise DataLoadError(f"{file}: sheet {name!r} is empty")
         names = header.iloc[0].tolist()
         _reject_duplicates(file, names)
+        labels = [f"Unnamed: {position}" if pd.isna(n) else n for position, n in enumerate(names)]
+        as_text = _text_dtypes(file, labels, text_columns)
 
-        frame = workbook.parse(name)
+        frame = workbook.parse(name, dtype=as_text or None)
         tokens = _converted_tokens(
             frame,
             lambda positions: workbook.parse(
@@ -146,6 +158,27 @@ def read_excel(file: Path, *, sheet: str | int | None) -> ReadResult:
         pairs = zip(frame.columns, names, strict=False)
         unnamed = tuple(str(column) for column, value in pairs if pd.isna(value))
         return ReadResult(frame, tokens, unnamed, (), zeros)
+
+
+_LISTED_COLUMNS = 20
+
+
+def _text_dtypes(file: Path, labels: list[Any], text_columns: tuple[str, ...]) -> dict[Any, type]:
+    """Map each requested column to ``str``, or raise if the file has no such column.
+
+    Requested names are matched against ``str(label)`` because Excel headers can be numbers. The
+    returned keys are the labels themselves, which is what pandas matches ``dtype`` against.
+    """
+    by_name = {str(label): label for label in labels}
+    missing = [name for name in text_columns if name not in by_name]
+    if missing:
+        shown = ", ".join(list(by_name)[:_LISTED_COLUMNS])
+        more = len(by_name) - _LISTED_COLUMNS
+        raise DataLoadError(
+            f"{file}: no column named {', '.join(repr(name) for name in missing)}; "
+            f"columns: {shown}" + (f" and {more} more" if more > 0 else "")
+        )
+    return {by_name[name]: str for name in text_columns}
 
 
 def _select_sheet(file: Path, names: list[str], sheet: str | int | None) -> str:
@@ -221,14 +254,16 @@ def _read_frame(
     *,
     raw_positions: list[int] | None = None,
     n_rows: int | None = None,
+    dtype: dict[Any, type] | None = None,
 ) -> pd.DataFrame:
     # index_col=False stops pandas from silently promoting the first column to the index when
     # rows are longer than the header. It then truncates those rows and emits a ParserWarning,
     # which is turned into an error so that no data is lost quietly.
     # raw_positions selects columns to read as untouched text, for counting converted tokens and
-    # leading zeros. n_rows limits how many rows that read returns.
+    # leading zeros. n_rows limits how many rows that read returns. dtype names the columns of the
+    # main read that are to be kept as text.
     raw = (
-        {}
+        {"dtype": dtype or None}
         if raw_positions is None
         else {
             "usecols": raw_positions,

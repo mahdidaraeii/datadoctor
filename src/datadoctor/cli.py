@@ -63,6 +63,16 @@ Separator = Annotated[
 ]
 Encoding = Annotated[str | None, typer.Option(help="csv, tsv and json only: the text encoding.")]
 Sheet = Annotated[str | None, typer.Option(help="Excel only: the sheet name.")]
+TextColumn = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--text-column",
+        help=(
+            "csv, tsv and Excel only: keep this column as text, so codes such as 01234 keep "
+            "their leading zeros. Repeat the option for more columns."
+        ),
+    ),
+]
 
 
 @app.command()
@@ -73,6 +83,7 @@ def profile(
     separator: Separator = None,
     encoding: Encoding = None,
     sheet: Sheet = None,
+    text_column: TextColumn = None,
     json_path: Annotated[
         Path | None,
         typer.Option(
@@ -89,6 +100,7 @@ def profile(
             separator=separator,
             encoding=encoding,
             sheet=sheet,
+            text_columns=text_column,
         )
         result = profile_schema(dataset)
     except DataDoctorError as exc:
@@ -109,6 +121,7 @@ def quality(
     separator: Separator = None,
     encoding: Encoding = None,
     sheet: Sheet = None,
+    text_column: TextColumn = None,
     as_of: Annotated[
         datetime.datetime | None,
         typer.Option(
@@ -140,6 +153,7 @@ def quality(
             separator=separator,
             encoding=encoding,
             sheet=sheet,
+            text_columns=text_column,
             config=config,
         )
         result = run_quality_checks(dataset, config, as_of=None if as_of is None else as_of.date())
