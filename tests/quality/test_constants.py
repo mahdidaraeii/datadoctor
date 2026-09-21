@@ -103,6 +103,27 @@ class TestFindings:
         assert found.affected_columns == ("nested",)
         assert "1 column holds values" in found.evidence
 
+    def test_one_column_gets_singular_verbs_and_several_get_plural_ones(self):
+        one = run(pd.DataFrame({"k": [1] * M, "n": [0] * 995 + [1] * 5, "v": range(M)}))
+        nested = {"d1": [{"k": 1}] * M, "d2": [{"k": 2}] * M}
+        several = run(
+            pd.DataFrame(
+                {"k": [1] * M, "j": [2] * M, "n": [0] * 995 + [1] * 5, "m": [0] * 996 + [1] * 4}
+                | nested
+            )
+        )
+
+        assert "1 column holds a single value: k." in finding(one, "Constant columns").evidence
+        assert "1 column has one value in" in finding(one, "Near-constant columns").evidence
+        assert "of its non-null values" in finding(one, "Near-constant columns").evidence
+        assert "of their non-null values" in finding(several, "Near-constant columns").evidence
+        assert "2 columns hold a single value" in finding(several, "Constant columns").evidence
+        assert "2 columns have one value in" in finding(several, "Near-constant columns").evidence
+        assert (
+            "2 columns hold values that"
+            in finding(several, "Some columns could not be checked").evidence
+        )
+
     def test_many_constant_columns_make_one_finding(self):
         frame = pd.DataFrame({f"k{i}": [1] * 50 for i in range(12)} | {"v": range(50)})
 

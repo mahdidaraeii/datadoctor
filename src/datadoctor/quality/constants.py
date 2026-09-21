@@ -112,6 +112,10 @@ def _plural(count: int, word: str) -> str:
     return word if count == 1 else f"{word}s"
 
 
+def _verb(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
+
+
 def _listed(names: list[str]) -> str:
     text = ", ".join(names[:LISTED])
     if len(names) > LISTED:
@@ -162,8 +166,8 @@ def _constants_finding(columns: list[dict]) -> Finding:
         confidence=1.0,
         title="Constant columns",
         evidence=(
-            f"{len(names)} {_plural(len(names), 'column')} hold a single value: {_listed(names)}."
-            + missing_note
+            f"{len(names)} {_plural(len(names), 'column')} "
+            f"{_verb(len(names), 'holds', 'hold')} a single value: {_listed(names)}." + missing_note
         ),
         interpretation=(
             "A column with one value cannot tell rows apart, so it carries no information for "
@@ -190,9 +194,10 @@ def _near_constants_finding(columns: list[dict]) -> Finding:
         confidence=1.0,
         title="Near-constant columns",
         evidence=(
-            f"{len(names)} {_plural(len(names), 'column')} have one value in at least "
-            f"{NEAR_CONSTANT_SHARE:.0%} of their non-null values. Share of the most common "
-            f"value: {listed}."
+            f"{len(names)} {_plural(len(names), 'column')} "
+            f"{_verb(len(names), 'has', 'have')} one value in at least "
+            f"{NEAR_CONSTANT_SHARE:.0%} of {_verb(len(names), 'its', 'their')} non-null values. "
+            f"Share of the most common value: {listed}."
         ),
         interpretation=(
             "A highly skewed column can be legitimate and is not a defect by itself. Zero-inflated "
@@ -213,14 +218,14 @@ def _near_constants_finding(columns: list[dict]) -> Finding:
 
 def _not_checked_finding(columns: list[dict]) -> Finding:
     names = [c["name"] for c in columns]
-    verb = "holds" if len(names) == 1 else "hold"
     return Finding(
         category="constants",
         severity=Severity.INFO,
         confidence=1.0,
         title="Some columns could not be checked",
         evidence=(
-            f"{len(names)} {_plural(len(names), 'column')} {verb} values that cannot be compared, "
+            f"{len(names)} {_plural(len(names), 'column')} "
+            f"{_verb(len(names), 'holds', 'hold')} values that cannot be compared, "
             f"such as lists or dicts inside cells: {_listed(names)}."
         ),
         interpretation=(
