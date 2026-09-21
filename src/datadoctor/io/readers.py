@@ -16,6 +16,7 @@ from typing import Any, NamedTuple
 import pandas as pd
 
 from datadoctor.core.exceptions import DataLoadError
+from datadoctor.io.leading_zeros import find_leading_zeros
 
 _COMMON_DELIMITERS = ",;\t|"
 
@@ -26,12 +27,15 @@ class ReadResult(NamedTuple):
     ``converted_tokens`` maps a column to the literal cell texts read as missing, with counts.
     ``unnamed_columns`` are columns whose empty header cell was named ``Unnamed: <position>``.
     ``promoted_index`` are columns created from a stored index.
+    ``leading_zeros`` maps a column that was read as numbers to how many of its values had a
+    leading zero in the file, which the numbers no longer show. See ``find_leading_zeros``.
     """
 
     frame: pd.DataFrame
     converted_tokens: dict[str, dict[str, int]]
     unnamed_columns: tuple[str, ...]
     promoted_index: tuple[str, ...]
+    leading_zeros: dict[str, dict[str, int]]
 
 
 def read_delimited(file: Path, *, separator: str, encoding: str) -> ReadResult:
@@ -49,9 +53,15 @@ def read_delimited(file: Path, *, separator: str, encoding: str) -> ReadResult:
     tokens = _converted_tokens(
         frame, lambda positions: _read_frame(file, separator, encoding, raw_positions=positions)
     )
+    zeros = find_leading_zeros(
+        frame,
+        lambda positions, n_rows: _read_frame(
+            file, separator, encoding, raw_positions=positions, n_rows=n_rows
+        ),
+    )
     pairs = zip(frame.columns, header, strict=False)
     unnamed = tuple(str(column) for column, name in pairs if name == "")
-    return ReadResult(frame, tokens, unnamed, ())
+    return ReadResult(frame, tokens, unnamed, (), zeros)
 
 
 def read_json(file: Path, *, encoding: str) -> ReadResult:
@@ -73,7 +83,7 @@ def read_json(file: Path, *, encoding: str) -> ReadResult:
     for position, record in enumerate(data):
         if not isinstance(record, dict):
             raise DataLoadError(f"{file}: element {position} of the array is not an object")
-    return ReadResult(pd.DataFrame(data), {}, (), ())
+    return ReadResult(pd.DataFrame(data), {}, (), (), {})
 
 
 def read_parquet(file: Path) -> ReadResult:
@@ -95,7 +105,7 @@ def read_parquet(file: Path) -> ReadResult:
                 f"{file}: the stored index cannot be turned into a column: {exc}"
             ) from exc
         promoted = tuple(str(column) for column in frame.columns if column not in stored)
-    return ReadResult(frame, {}, (), promoted)
+    return ReadResult(frame, {}, (), promoted, {})
 
 
 def read_excel(file: Path, *, sheet: str | int | None) -> ReadResult:
@@ -122,9 +132,20 @@ def read_excel(file: Path, *, sheet: str | int | None) -> ReadResult:
                 name, usecols=positions, dtype=str, keep_default_na=False, na_filter=False
             ),
         )
+        zeros = find_leading_zeros(
+            frame,
+            lambda positions, n_rows: workbook.parse(
+                name,
+                usecols=positions,
+                nrows=n_rows,
+                dtype=str,
+                keep_default_na=False,
+                na_filter=False,
+            ),
+        )
         pairs = zip(frame.columns, names, strict=False)
         unnamed = tuple(str(column) for column, value in pairs if pd.isna(value))
-        return ReadResult(frame, tokens, unnamed, ())
+        return ReadResult(frame, tokens, unnamed, (), zeros)
 
 
 def _select_sheet(file: Path, names: list[str], sheet: str | int | None) -> str:
@@ -194,12 +215,18 @@ def _converted_tokens(
 
 
 def _read_frame(
-    file: Path, separator: str, encoding: str, *, raw_positions: list[int] | None = None
+    file: Path,
+    separator: str,
+    encoding: str,
+    *,
+    raw_positions: list[int] | None = None,
+    n_rows: int | None = None,
 ) -> pd.DataFrame:
     # index_col=False stops pandas from silently promoting the first column to the index when
     # rows are longer than the header. It then truncates those rows and emits a ParserWarning,
     # which is turned into an error so that no data is lost quietly.
-    # raw_positions selects columns to read as untouched text, for counting converted tokens.
+    # raw_positions selects columns to read as untouched text, for counting converted tokens and
+    # leading zeros. n_rows limits how many rows that read returns.
     raw = (
         {}
         if raw_positions is None
@@ -208,6 +235,7 @@ def _read_frame(
             "dtype": str,
             "keep_default_na": False,
             "na_filter": False,
+            "nrows": n_rows,
         }
     )
     try:

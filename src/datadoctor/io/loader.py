@@ -58,6 +58,9 @@ def load_dataset(
     - csv, tsv and Excel: empty cells and the standard missing-value tokens (``NA``, ``N/A``,
       ``NaN``, ``null``, ``None`` and similar) are read as missing. A genuine value spelled like
       one of these, such as the country code ``NA``, is also read as missing.
+    - csv, tsv and Excel: a column of codes such as ``01234`` is read as the number 1234, and the
+      zeros are lost. Excel does this even for cells stored as text. The file is checked for
+      this, see below. json and parquet keep such values as text.
     - csv and tsv: column types are inferred from the whole file. A row with fewer fields than
       the header is padded with missing values, and an empty header cell becomes
       ``Unnamed: <position>``. Excel also names an empty header cell ``Unnamed: <position>``.
@@ -69,8 +72,10 @@ def load_dataset(
 
     What the loader changed or could not keep as written is recorded in ``Dataset.provenance``:
     the literal texts read as missing (``converted_tokens``), empty header cells that were named
-    ``Unnamed: <position>`` (``unnamed_columns``) and a promoted parquet index
-    (``promoted_index``). Rows padded because they were shorter than the header are not recorded.
+    ``Unnamed: <position>`` (``unnamed_columns``), a promoted parquet index (``promoted_index``)
+    and numeric columns whose values had leading zeros in the file (``leading_zeros``). The last
+    is checked on the first 100,000 rows, for csv, tsv and Excel files. Rows padded because they
+    were shorter than the header are not recorded.
 
     Args:
         path: The file to read.
@@ -122,6 +127,7 @@ def load_dataset(
         converted_tokens=read.converted_tokens,
         unnamed_columns=read.unnamed_columns,
         promoted_index=read.promoted_index,
+        leading_zeros=read.leading_zeros,
     )
     return Dataset(
         data=read.frame,

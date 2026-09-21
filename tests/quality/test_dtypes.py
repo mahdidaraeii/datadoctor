@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datadoctor import AnalysisConfig, AnalysisResult, Dataset, Severity, load_dataset
+from datadoctor import AnalysisConfig, AnalysisResult, Dataset, Provenance, Severity, load_dataset
 from datadoctor.core.exceptions import DatasetError
 from datadoctor.quality.dtypes import check_dtypes
 
@@ -123,6 +123,106 @@ class TestLeadingZeros:
         result = run(pd.DataFrame({"c": [f"0.{k}" for k in range(100)]}))
 
         assert kinds(result) == {"c": "numbers_as_text"}
+
+
+def zero_padded_csv(tmp_path):
+    """60 rows. ``zip`` is read as numbers and loses its zeros. ``sku`` has a stray ``?``, so it
+    is read as text and keeps them."""
+    lines = ["zip,amount,sku"]
+    for k in range(60):
+        zip_code = ["01234", "56789", "00042", "90210"][k % 4]
+        lines.append(f"{zip_code},{100 + k},{'?' if k % 30 == 0 else f'{k:03d}'}")
+    path = tmp_path / "codes.csv"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+    return path
+
+
+class TestLeadingZerosLostAtLoad:
+    def test_a_column_that_lost_its_zeros_is_reported_from_the_loaders_record(self, tmp_path):
+        result = check_dtypes(load_dataset(zero_padded_csv(tmp_path)), CONFIG)
+
+        lost = finding(result, "Leading zeros were lost when the file was read")
+        assert (lost.severity, lost.confidence) == (Severity.MEDIUM, 0.7)
+        assert lost.affected_columns == ("zip",)
+        assert "zip (30 of the 60 rows; every value was 5 characters wide)" in lost.evidence
+        assert "cannot be recovered" in lost.interpretation
+        assert column(result, "zip") == {
+            "name": "zip",
+            "kind": "codes_lost",
+            "leading_zero": 30,
+            "checked": 60,
+            "width": 5,
+        }
+
+    def test_a_column_is_reported_by_one_path_only(self, tmp_path):
+        result = check_dtypes(load_dataset(zero_padded_csv(tmp_path)), CONFIG)
+
+        # zip lost its zeros at load. sku is text that still has them.
+        assert kinds(result) == {"zip": "codes_lost", "sku": "numeric_codes"}
+        by_title = {f.title: f.affected_columns for f in result.findings}
+        assert by_title == {
+            "Leading zeros were lost when the file was read": ("zip",),
+            "Numeric-looking columns with leading zeros": ("sku",),
+        }
+
+    def test_a_record_for_a_column_that_is_text_in_the_frame_is_ignored(self):
+        frame = pd.DataFrame({"zip": [f"{k:05d}" for k in range(100)]})
+        record = {"zip": {"values": 100, "checked": 100, "width": 5}}
+        dataset = Dataset(
+            data=frame, name="t", provenance=Provenance.capture(frame, leading_zeros=record)
+        )
+
+        result = check_dtypes(dataset, CONFIG)
+
+        assert kinds(result) == {"zip": "numeric_codes"}
+
+    def test_the_column_that_lost_the_most_zeros_is_listed_first(self):
+        frame = pd.DataFrame({"few": [1, 2, 3], "many": [4, 5, 6], "tie": [7, 8, 9]})
+        record = {
+            "few": {"values": 2, "checked": 3},
+            "many": {"values": 9, "checked": 3},
+            "tie": {"values": 2, "checked": 3},
+        }
+        dataset = Dataset(
+            data=frame, name="t", provenance=Provenance.capture(frame, leading_zeros=record)
+        )
+
+        lost = finding(
+            check_dtypes(dataset, CONFIG), "Leading zeros were lost when the file was read"
+        )
+
+        text = lost.evidence
+        assert text.index("many (") < text.index("few (") < text.index("tie (")
+
+    def test_without_a_record_nothing_is_reported(self):
+        assert run(pd.DataFrame({"zip": [1234, 42, 56789]})).findings == ()
+
+    def test_a_partial_check_is_said_and_a_missing_width_is_left_out(self):
+        frame = pd.DataFrame({"zip": [1234, 42, 56789]})
+        record = {"zip": {"values": 3, "checked": 100_000}}
+        dataset = Dataset(
+            data=frame, name="t", provenance=Provenance.capture(frame, leading_zeros=record)
+        )
+
+        lost = finding(
+            check_dtypes(dataset, CONFIG), "Leading zeros were lost when the file was read"
+        )
+
+        assert "zip (3 of the first 100,000 rows)" in lost.evidence
+        assert "characters wide" not in lost.evidence
+
+    def test_a_single_row_is_not_pluralized(self):
+        frame = pd.DataFrame({"zip": [1234]})
+        record = {"zip": {"values": 1, "checked": 1}}
+        dataset = Dataset(
+            data=frame, name="t", provenance=Provenance.capture(frame, leading_zeros=record)
+        )
+
+        lost = finding(
+            check_dtypes(dataset, CONFIG), "Leading zeros were lost when the file was read"
+        )
+
+        assert "zip (1 of the 1 row)" in lost.evidence
 
 
 class TestMixedTypes:

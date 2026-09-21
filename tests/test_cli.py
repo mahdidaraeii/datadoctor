@@ -65,7 +65,12 @@ class TestProfileTables:
         assert table_row(output, "SHA-256 (first 16)")[1] == "309b0e45a73d3fc5"
         assert table_row(output, "Size")[1] == "4 bytes"
         assert table_row(output, "Shape")[1] == "1 rows, 1 columns"
-        for note in ("Read as missing", "Unnamed columns", "Promoted index"):
+        for note in (
+            "Read as missing",
+            "Leading zeros dropped",
+            "Unnamed columns",
+            "Promoted index",
+        ):
             assert table_row(output, note)[1] == "none"
 
     def test_loader_notes_are_shown(self, tmp_path):
@@ -76,6 +81,47 @@ class TestProfileTables:
 
         assert table_row(output, "Read as missing")[1] == "city: NA x2, null x1"
         assert table_row(output, "Unnamed columns")[1] == "Unnamed: 1"
+
+
+def zips_csv(tmp_path):
+    """40 rows of a zero-padded code, read as numbers, and a plain number."""
+    lines = ["zip,amount"]
+    lines += [f"{['01234', '56789', '00042', '90210'][k % 4]},{100 + k}" for k in range(40)]
+    path = tmp_path / "zips.csv"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+    return path
+
+
+class TestLeadingZerosLostAtLoad:
+    def test_profile_shows_what_the_file_had_and_the_loaded_column_as_numbers(self, tmp_path):
+        output = run("profile", zips_csv(tmp_path)).output
+
+        assert (
+            table_row(output, "Leading zeros dropped")[1] == "zip: 20 of 40 rows, 5 characters wide"
+        )
+        assert table_row(output, "zip")[2] == "numeric"
+
+    def test_a_column_whose_values_had_different_widths_is_shown_without_a_width(self, tmp_path):
+        path = tmp_path / "mixed.csv"
+        path.write_text("code\n007\n12\n0042\n8\n", encoding="utf-8", newline="")
+
+        output = run("profile", path).output
+
+        assert table_row(output, "Leading zeros dropped")[1] == "code: 2 of 4 rows"
+
+    def test_quality_reports_the_finding_for_the_column(self, tmp_path):
+        output = run("quality", zips_csv(tmp_path)).output
+
+        assert "Leading zeros were lost when the file was read" in output
+        assert "Columns:        zip" in output
+
+    def test_the_record_is_in_the_json_provenance(self, tmp_path):
+        out = tmp_path / "quality.json"
+        run("quality", zips_csv(tmp_path), "--json", out)
+
+        provenance = Provenance.from_dict(json.loads(out.read_text(encoding="utf-8"))["provenance"])
+
+        assert provenance.leading_zeros == {"zip": {"values": 20, "checked": 40, "width": 5}}
 
 
 class TestJsonFile:

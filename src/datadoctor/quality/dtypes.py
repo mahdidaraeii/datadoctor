@@ -44,6 +44,12 @@ def check_dtypes(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
     ``01234``, the column is reported separately as numeric-looking codes that must not be
     converted, because converting destroys the zeros.
 
+    **Leading zeros lost at load.** A csv, tsv or Excel column of codes such as ``01234`` is read
+    as the number 1234. The loader records such columns in ``dataset.provenance.leading_zeros``,
+    from the file's own text, and each is reported here as a separate finding, because the zeros
+    are already gone from the data. A column that is text in the frame is never reported this
+    way, only as numeric-looking codes above.
+
     **Mixed types.** An object column whose non-null values are of more than one Python type, for
     example integers and strings from an Excel sheet or a JSON file. The finding gives the exact
     count of each type. A column of only lists or dicts is not mixed.
@@ -76,6 +82,7 @@ def check_dtypes(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
             entry = _mixed_types(str(frame.columns[position]), values)
         if entry is not None:
             reported.append(entry)
+    reported.extend(_lost_leading_zeros(dataset))
 
     def of_kind(kind: str) -> list[dict]:
         return [c for c in reported if c["kind"] == kind]
@@ -85,11 +92,34 @@ def check_dtypes(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
         findings.append(report.numbers_finding(of_kind("numbers_as_text")))
     if of_kind("numeric_codes"):
         findings.append(report.codes_finding(of_kind("numeric_codes")))
+    if of_kind("codes_lost"):
+        findings.append(report.lost_zeros_finding(of_kind("codes_lost"), n_rows))
     if of_kind("mixed_types"):
         findings.append(report.mixed_finding(of_kind("mixed_types")))
 
     metrics = {"n_rows": n_rows, "n_columns": n_columns, "columns": reported}
     return AnalysisResult(findings=findings, metrics=metrics, config=config)
+
+
+def _lost_leading_zeros(dataset: Dataset) -> list[dict]:
+    """Columns the loader recorded as having lost leading zeros, and that are numeric now.
+
+    A column that is text in the frame is left to the numbers-as-text check, which reports its
+    leading zeros as codes. The two never overlap, so no column is reported twice.
+    """
+    frame = dataset.data
+    numeric = {str(label) for label, dtype in frame.dtypes.items() if pt.is_numeric_dtype(dtype)}
+    return [
+        {
+            "name": name,
+            "kind": "codes_lost",
+            "leading_zero": record["values"],
+            "checked": record["checked"],
+            "width": record.get("width"),
+        }
+        for name, record in dataset.provenance.leading_zeros.items()
+        if name in numeric
+    ]
 
 
 def _numbers_as_text(name: str, values: pd.Series) -> dict | None:

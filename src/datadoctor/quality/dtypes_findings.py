@@ -117,6 +117,55 @@ def codes_finding(columns: list[dict]) -> Finding:
     )
 
 
+def _describe_lost_zeros(column: dict, n_rows: int) -> str:
+    checked = column["checked"]
+    scope = f"the {checked:,}" if checked == n_rows else f"the first {checked:,}"
+    text = f"{column['name']} ({column['leading_zero']:,} of {scope} {_plural(checked, 'row')}"
+    if column["width"] is not None:
+        text += f"; every value was {column['width']} characters wide"
+    return text + ")"
+
+
+def lost_zeros_finding(columns: list[dict], n_rows: int) -> Finding:
+    """Columns that were read as numbers although their values had leading zeros in the file."""
+    ranked = sorted(columns, key=lambda c: (-c["leading_zero"], c["name"]))
+    shown = [_describe_lost_zeros(c, n_rows) for c in ranked[:LISTED]]
+    return Finding(
+        category="dtypes",
+        severity=Severity.MEDIUM,
+        confidence=0.7,
+        title="Leading zeros were lost when the file was read",
+        evidence=(
+            f"{len(columns)} numeric {_plural(len(columns), 'column')} had values with a leading "
+            "zero in the file, and the zeros were dropped when the numbers were read: "
+            + "; ".join(shown)
+            + _more(len(columns), len(shown))
+            + "."
+        ),
+        interpretation=(
+            "Values such as 01234 are usually codes, like postcodes or product and account "
+            "numbers, and not quantities. The loaded column holds 1234, so the zeros cannot be "
+            "recovered from it, and joins or comparisons with data that keeps the zeros will not "
+            "match. The file itself is unchanged. This is a heuristic: leading zeros suggest "
+            "codes but do not prove them."
+        ),
+        limitations=(
+            "The file's own text was compared with the loaded numbers, but only the first "
+            "100,000 rows of each column, so a leading zero further down is not counted. Only "
+            "columns that were read as whole, non-negative numbers are examined. Codes with no "
+            "leading zeros, such as five-digit postcodes that all start with other digits, "
+            "cannot be recognized this way."
+        ),
+        affected_columns=tuple(c["name"] for c in columns),
+        recommendation=(
+            "Read these columns as text, for example with pandas.read_csv and dtype=str for the "
+            "column, and give the frame to Dataset. If every value had the same width, as "
+            "recorded above, padding the loaded numbers to that width with zfill restores the "
+            "codes. Nothing was converted here."
+        ),
+    )
+
+
 def mixed_finding(columns: list[dict]) -> Finding:
     """Columns whose values are of more than one Python type."""
     ranked = sorted(columns, key=lambda c: (-(c["non_null"] - max(c["types"].values())), c["name"]))

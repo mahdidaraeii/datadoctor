@@ -27,6 +27,7 @@ _OPTIONAL = (
     "converted_tokens",
     "unnamed_columns",
     "promoted_index",
+    "leading_zeros",
 )
 
 
@@ -52,6 +53,12 @@ class Provenance(JsonSerializable):
         unnamed_columns: Columns whose header cell was empty and that were named
             ``Unnamed: <position>``.
         promoted_index: Columns created from a stored index, which parquet files can carry.
+        leading_zeros: Columns that were read as numbers although some of their values had a
+            leading zero in the file, as ``{column: {"values": n, "checked": m, "width": w}}``.
+            The zeros are not in the loaded data. ``values`` counts the values with a leading
+            zero among the first ``checked`` rows, and ``width`` is the length of every
+            non-empty value there when they were all the same length, which is typical of codes.
+            Only csv, tsv and Excel files are checked, and only whole, non-negative columns.
     """
 
     file_sha256: str | None = None
@@ -65,6 +72,7 @@ class Provenance(JsonSerializable):
     converted_tokens: dict[str, dict[str, int]] = field(default_factory=dict)
     unnamed_columns: tuple[str, ...] = ()
     promoted_index: tuple[str, ...] = ()
+    leading_zeros: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "shape", tuple(self.shape))
@@ -72,6 +80,11 @@ class Provenance(JsonSerializable):
             self,
             "converted_tokens",
             {column: dict(tokens) for column, tokens in self.converted_tokens.items()},
+        )
+        object.__setattr__(
+            self,
+            "leading_zeros",
+            {column: dict(entry) for column, entry in self.leading_zeros.items()},
         )
         object.__setattr__(self, "unnamed_columns", tuple(self.unnamed_columns))
         object.__setattr__(self, "promoted_index", tuple(self.promoted_index))
@@ -86,6 +99,7 @@ class Provenance(JsonSerializable):
         converted_tokens: dict[str, dict[str, int]] | None = None,
         unnamed_columns: tuple[str, ...] = (),
         promoted_index: tuple[str, ...] = (),
+        leading_zeros: dict[str, dict[str, int]] | None = None,
     ) -> "Provenance":
         """Record the current conditions for a loaded frame, hashing ``file`` if there is one."""
         from datadoctor import __version__
@@ -105,6 +119,7 @@ class Provenance(JsonSerializable):
             converted_tokens={} if converted_tokens is None else converted_tokens,
             unnamed_columns=unnamed_columns,
             promoted_index=promoted_index,
+            leading_zeros={} if leading_zeros is None else leading_zeros,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -122,6 +137,7 @@ class Provenance(JsonSerializable):
             },
             "unnamed_columns": list(self.unnamed_columns),
             "promoted_index": list(self.promoted_index),
+            "leading_zeros": {column: dict(entry) for column, entry in self.leading_zeros.items()},
         }
 
     @classmethod

@@ -105,6 +105,7 @@ def _provenance_table(dataset: Dataset, provenance: Provenance) -> Table:
     table.add_row("Versions", _versions(provenance))
     table.add_row("Config", _config(provenance))
     table.add_row("Read as missing", _converted_tokens(provenance))
+    table.add_row("Leading zeros dropped", _leading_zeros(provenance))
     table.add_row("Unnamed columns", ", ".join(provenance.unnamed_columns) or "none")
     table.add_row("Promoted index", ", ".join(provenance.promoted_index) or "none")
     return table
@@ -132,6 +133,18 @@ def _converted_tokens(provenance: Provenance) -> str:
     for column, tokens in provenance.converted_tokens.items():
         listed = ", ".join(f"{token} x{count}" for token, count in tokens.items())
         lines.append(f"{column}: {listed}")
+    return "\n".join(lines)
+
+
+def _leading_zeros(provenance: Provenance) -> str:
+    if not provenance.leading_zeros:
+        return "none"
+    lines = []
+    for column, entry in provenance.leading_zeros.items():
+        line = f"{column}: {entry['values']} of {entry['checked']} rows"
+        if "width" in entry:
+            line += f", {entry['width']} characters wide"
+        lines.append(line)
     return "\n".join(lines)
 
 

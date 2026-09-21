@@ -41,6 +41,7 @@ class TestCapture:
         assert provenance.converted_tokens == {}
         assert provenance.unnamed_columns == ()
         assert provenance.promoted_index == ()
+        assert provenance.leading_zeros == {}
 
     def test_config_must_be_an_analysis_config(self, frame):
         with pytest.raises(TypeError, match="AnalysisConfig"):
@@ -53,9 +54,16 @@ class TestCapture:
             converted_tokens={"city": {"NA": 2, "null": 1}},
             unnamed_columns=("Unnamed: 1",),
             promoted_index=("key",),
+            leading_zeros={"zip": {"values": 3, "checked": 10, "width": 5}},
         )
 
         assert Provenance.from_json(provenance.to_json()) == provenance
+
+    def test_a_record_saved_before_leading_zeros_were_recorded_still_loads(self, frame):
+        saved = Provenance.capture(frame).to_dict()
+        del saved["leading_zeros"]
+
+        assert Provenance.from_dict(saved).leading_zeros == {}
 
 
 class TestDatasetProvenance:
