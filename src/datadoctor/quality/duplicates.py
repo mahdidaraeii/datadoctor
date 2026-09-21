@@ -48,7 +48,8 @@ def check_duplicates(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult
     positions (counted from 0), since identifiers can be personal data.
 
     ``metrics`` holds ``rows`` (the exact repeats), ``rows_ignoring_identifiers`` (``None`` unless
-    the dataset has columns typed as identifiers by the schema profile) and ``identifiers``.
+    the dataset has columns typed as identifiers by the schema profile), ``identifiers`` (the
+    repeated-value counts of the identifiers that are checked) and ``identifiers_not_checked``.
 
     Findings:
 
@@ -57,8 +58,11 @@ def check_duplicates(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult
       every row differ, so a plain comparison of rows always reports clean. The confidence is the
       lowest identifier confidence among the ignored columns, since the claim is only as good as
       the typing that produced it;
-    - per identifier column, values that repeat, split into groups whose rows are exact copies and
-      groups whose rows differ (the same id with conflicting data);
+    - per identifier column whose name matches an identifier pattern, values that repeat, split
+      into groups whose rows are exact copies and groups whose rows differ (the same id with
+      conflicting data). An identifier that is typed so only because it is nearly unique is not
+      checked, since repeats in it contradict that typing and do not show a defect. It is named
+      in ``identifiers_not_checked``, and is still ignored when looking for hidden repeats;
     - an INFO finding when columns were left out of the comparison.
 
     Args:
@@ -88,11 +92,15 @@ def check_duplicates(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult
         keep = [k for k, i in enumerate(comparable) if i not in identifiers]
         hidden = _row_duplicates(matrix[:, keep], n_rows)
 
+    # Repeated values only count against a column that is typed as an identifier because of its
+    # name. When it is typed so only because it is nearly unique, repeats contradict that typing
+    # instead of showing a defect, so such columns are not checked.
+    named = [i for i in identifiers if schema[i]["identifier_named"]]
     by_identifier = [
         _identifier_duplicates(
             names[i], schema[i]["identifier_confidence"], all_codes[i], matrix, n_rows
         )
-        for i in identifiers
+        for i in named
     ]
 
     findings: list[Finding] = []
@@ -116,6 +124,7 @@ def check_duplicates(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult
         if hidden is None
         else {"identifier_columns": [names[i] for i in identifiers], **_rows_metrics(hidden)},
         "identifiers": [duplicates._asdict() for duplicates in by_identifier],
+        "identifiers_not_checked": [names[i] for i in identifiers if i not in named],
     }
     return AnalysisResult(findings=findings, metrics=metrics, config=config)
 

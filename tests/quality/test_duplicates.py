@@ -204,6 +204,40 @@ class TestDuplicateIdentifiers:
         assert "900005" not in text
 
 
+class TestIdentifiersThatAreOnlyNearlyUnique:
+    def codes(self, name):
+        """1,000 rows. ``name`` holds 960 distinct codes, and 40 of them come back later on rows
+        with different content. The amounts repeat on 30 rows, whatever the codes are."""
+        codes = [f"Z{k}" for k in range(960)] + [f"Z{k}" for k in range(40)]
+        amounts = (np.arange(1000) % 970) * 1.5 + 0.25
+        return pd.DataFrame({name: codes, "amount": amounts})
+
+    def test_repeats_in_a_column_typed_as_an_identifier_by_uniqueness_alone_are_no_defect(self):
+        result = run(self.codes("zip"))
+
+        assert result.metrics["identifiers"] == []
+        assert result.metrics["identifiers_not_checked"] == ["zip"]
+        assert not [f for f in result.findings if f.title.startswith("Repeated values")]
+
+    def test_the_same_column_with_an_identifier_name_is_checked(self):
+        result = run(self.codes("zip_id"))
+
+        (ids,) = result.metrics["identifiers"]
+        assert (ids["name"], ids["extra_rows"]) == ("zip_id", 40)
+        assert result.metrics["identifiers_not_checked"] == []
+        assert finding(result, "Repeated values in identifier column zip_id")
+
+    def test_such_a_column_is_still_ignored_when_looking_for_hidden_repeats(self):
+        result = run(self.codes("zip"))
+
+        # Ignoring the codes, 30 rows repeat an earlier amount. The claim is only as sure as the
+        # typing, which rests on uniqueness alone, so its confidence is the lowest tier.
+        assert result.metrics["rows_ignoring_identifiers"]["identifier_columns"] == ["zip"]
+        hidden = finding(result, "Duplicate rows hidden by identifier columns")
+        assert result.metrics["rows_ignoring_identifiers"]["duplicate_rows"] == 30
+        assert hidden.confidence == 0.6
+
+
 class TestColumnsLeftOut:
     def test_nested_columns_are_left_out_and_named(self):
         frame = pd.DataFrame(

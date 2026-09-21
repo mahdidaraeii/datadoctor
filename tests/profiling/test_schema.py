@@ -98,6 +98,19 @@ EXPECTED_IDENTIFIER_CONFIDENCE = {
 }
 
 
+# Whether the name matched, for the identifier candidates. Only row_number and order_ref are
+# candidates on their values alone. parent_id is a candidate because of its name alone.
+EXPECTED_IDENTIFIER_NAMED = {
+    "customer_id": True,
+    "account_id": True,
+    "legacy_id": True,
+    "ticket_id": True,
+    "row_number": False,
+    "order_ref": False,
+    "parent_id": True,
+}
+
+
 @pytest.fixture(scope="module")
 def result() -> AnalysisResult:
     return profile_schema(Dataset(data=planted_frame(), name="planted"))
@@ -134,6 +147,15 @@ class TestIdentifiers:
         }
 
         assert found == EXPECTED_IDENTIFIER_CONFIDENCE
+
+    def test_the_column_name_is_reported_as_evidence_for_the_candidates_only(self, columns):
+        named = {name: c["identifier_named"] for name, c in columns.items()}
+
+        assert {n: v for n, v in named.items() if v is not None} == EXPECTED_IDENTIFIER_NAMED
+        assert all(
+            (c["identifier_named"] is None) == (c["identifier_confidence"] is None)
+            for c in columns.values()
+        )
 
     def test_every_candidate_gets_a_finding_with_the_same_confidence(self, result):
         by_column = {f.affected_columns[0]: f for f in result.findings}

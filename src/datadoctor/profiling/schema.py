@@ -72,8 +72,11 @@ def profile_schema(dataset: Dataset) -> AnalysisResult:
     ``metrics`` holds ``n_rows``, ``n_columns`` and ``columns``, a list in file order. Each entry
     has ``name`` (non-string labels are converted to text), ``dtype`` as pandas reports it,
     ``semantic_type``, ``cardinality`` (distinct non-null values, ``None`` when it cannot be
-    counted), ``null_count`` and ``identifier_confidence`` (``None`` when the column is not an
-    identifier candidate).
+    counted), ``null_count``, ``identifier_confidence`` (``None`` when the column is not an
+    identifier candidate) and ``identifier_named`` (whether the column name matches an identifier
+    pattern, ``None`` when the column is not a candidate). The name is the one piece of identifier
+    evidence that does not come from the values, so a caller can tell an identifier that is named
+    as one from an identifier that is only nearly unique.
 
     Semantic types, tried in this order on the non-null values:
 
@@ -112,6 +115,7 @@ def profile_schema(dataset: Dataset) -> AnalysisResult:
                 "cardinality": cardinality,
                 "null_count": int(series.isna().sum()),
                 "identifier_confidence": None if identifier is None else identifier.confidence,
+                "identifier_named": None if identifier is None else identifier.named,
             }
         )
         if identifier is not None:
