@@ -3,6 +3,9 @@
 Each figure is a grid of small plots, one per column, of one kind of column. A numeric column is a
 histogram, or one bar per value when it holds few whole numbers. A categorical column is a bar for
 each of its most frequent values. Whatever the data is, a figure is a file, and nothing is shown.
+
+``draw_numeric`` and ``draw_categorical`` draw onto any axis, given a column of the shape built
+here, so ``relationships_plots.py`` reuses them for the single target distribution plot.
 """
 
 from pathlib import Path
@@ -34,7 +37,7 @@ def save_page(
     kind: str, page: int, pages: int, columns: list[dict[str, Any]], config: AnalysisConfig
 ) -> Path:
     """Draw up to ``PER_PAGE`` columns of one kind on one figure, save it and return its path."""
-    draw = _draw_numeric if kind == "numeric" else _draw_categorical
+    draw = draw_numeric if kind == "numeric" else draw_categorical
     rows = -(-len(columns) // COLUMNS)  # only as many rows as the columns need
     size = (PAGE_WIDTH, ROW_HEIGHT * rows + TITLE_HEIGHT)
     with new_figure(rows, COLUMNS, size=size) as (fig, axes):
@@ -49,7 +52,7 @@ def save_page(
     return save_figure(fig, figure_path(config, f"univariate_{kind}_{page}"))
 
 
-def _draw_numeric(axis, column: dict[str, Any]) -> None:
+def draw_numeric(axis, column: dict[str, Any]) -> None:
     discrete = column["discrete"]
     if discrete is not None:
         values, counts = discrete
@@ -106,7 +109,7 @@ def _draw_overflow(axis, shown: dict[str, Any], finite: np.ndarray, edges: np.nd
         )
 
 
-def _draw_categorical(axis, column: dict[str, Any]) -> None:
+def draw_categorical(axis, column: dict[str, Any]) -> None:
     counts = [entry["count"] for entry in column["top"]]
     labels = [entry.get("label") for entry in column["top"]]
     if column["other_count"]:
