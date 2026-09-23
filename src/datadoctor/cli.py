@@ -12,9 +12,10 @@ from datadoctor import AnalysisConfig, __version__, load_dataset
 from datadoctor.core.dataset import Dataset
 from datadoctor.core.exceptions import DataDoctorError
 from datadoctor.core.result import AnalysisResult
+from datadoctor.eda import run_eda
 from datadoctor.profiling.schema import profile_schema
 from datadoctor.quality import run_quality_checks
-from datadoctor.render import render_profile, render_quality
+from datadoctor.render import render_explore, render_profile, render_quality
 
 app = typer.Typer(
     help="A diagnostic workbench for tabular datasets.",
@@ -165,6 +166,36 @@ def quality(
         return
     _write_json(json_path, dataset, "quality", result)
     typer.echo(f"Wrote quality report to {json_path}")
+
+
+@app.command()
+def explore(
+    path: Annotated[Path, typer.Argument(metavar="PATH", help="The data file to explore.")],
+    target: Target = None,
+    file_format: FileFormat = None,
+    separator: Separator = None,
+    encoding: Encoding = None,
+    sheet: Sheet = None,
+    text_column: TextColumn = None,
+) -> None:
+    """Draw and summarize the distributions and relationships in a data file."""
+    config = AnalysisConfig()
+    try:
+        dataset = load_dataset(
+            path,
+            file_format=file_format,
+            target=target,
+            separator=separator,
+            encoding=encoding,
+            sheet=sheet,
+            text_columns=text_column,
+            config=config,
+        )
+        result = run_eda(dataset, config)
+    except DataDoctorError as exc:
+        _fail(str(exc))
+
+    render_explore(Console(), dataset, result)
 
 
 def _write_json(path: Path, dataset: Dataset, key: str, result: AnalysisResult) -> None:

@@ -488,3 +488,95 @@ class TestQualityFailures:
         assert result.exit_code == 1
         assert "error: file not found" in result.output
         assert "Traceback" not in result.output
+
+
+def explore_csv(tmp_path):
+    """60 rows: ``ident`` is not plotted or compared, ``x`` is strongly associated with the
+    numeric target ``y``."""
+    lines = ["ident,x,y"]
+    for k in range(60):
+        x = k % 5
+        y = x * 20 + k % 7
+        lines.append(f"ID-{k:04d},{x},{y}")
+    path = tmp_path / "explore.csv"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+    return path
+
+
+class TestExploreOutput:
+    def test_files_are_listed_and_exist_under_the_configured_directory(self, tmp_path):
+        result = run("explore", explore_csv(tmp_path), "--target", "y")
+
+        assert result.exit_code == 0
+        assert "Files: 2" in result.output
+        for key in ("target_distribution", "univariate_numeric_1"):
+            match = re.search(rf"{key}: (\S+)", result.output)
+            assert match is not None
+            assert Path(match.group(1)).exists()
+        # sorted alphabetically, not in the order the analyzers happened to produce them: the
+        # relationships analyzer runs second but "target_distribution" sorts before "univariate_*".
+        assert result.output.index("target_distribution") < result.output.index(
+            "univariate_numeric_1"
+        )
+
+    def test_findings_are_printed_most_severe_first(self, tmp_path):
+        output = run("explore", explore_csv(tmp_path), "--target", "y").output
+
+        titles = [
+            "Some columns were not plotted",  # univariate, an INFO finding
+            "Columns most associated with the target",  # relationships, also INFO
+            "Some columns were not compared",  # relationships, also INFO
+        ]
+        positions = [output.index(title) for title in titles]
+        assert positions == sorted(positions)
+        summary = next(line for line in output.splitlines() if line.startswith("Findings:"))
+        assert "3 info" in summary
+
+    def test_target_reaches_the_analyzers(self, tmp_path):
+        path = explore_csv(tmp_path)
+
+        assert "Columns most associated with the target" not in run("explore", path).output
+        assert (
+            "Columns most associated with the target"
+            in run("explore", path, "--target", "y").output
+        )
+
+    def test_no_findings_is_reported_as_the_checks_that_found_nothing_not_as_clean_data(
+        self, tmp_path
+    ):
+        result = run("explore", clean_csv(tmp_path))
+
+        assert result.exit_code == 0
+        assert "No findings from: univariate, relationships." in result.output
+        assert "Findings:" not in result.output
+
+
+class TestExploreFlagsReachTheLoader:
+    def test_format(self, tmp_path):
+        path = tmp_path / "data.txt"
+        path.write_text("a,b\n1,2\n", encoding="utf-8", newline="")
+
+        assert run("explore", path).exit_code == 1
+        assert run("explore", path, "--format", "csv").exit_code == 0
+
+
+class TestExploreFailures:
+    def test_a_load_error_is_one_line_and_exit_one(self, tmp_path):
+        result = run("explore", tmp_path / "nope.csv")
+
+        assert result.exit_code == 1
+        assert "error: file not found" in result.output
+        assert "Traceback" not in result.output
+
+    def test_a_dataset_with_no_rows_is_a_clean_error(self, tmp_path):
+        # The loader itself refuses an empty file, so run_eda's own guard is never reached here;
+        # that guard is exercised directly in tests/eda/test_run.py.
+        path = tmp_path / "empty.csv"
+        path.write_text("a,b\n", encoding="utf-8", newline="")
+
+        result = run("explore", path)
+
+        assert result.exit_code == 1
+        assert "error: " in result.output
+        assert "no data rows" in result.output
+        assert "Traceback" not in result.output

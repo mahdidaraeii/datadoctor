@@ -56,13 +56,45 @@ def render_quality(console: Console, dataset: Dataset, result: AnalysisResult) -
         console.print(_finding_block(finding))
 
 
+def render_explore(console: Console, dataset: Dataset, result: AnalysisResult) -> None:
+    """Print the files an EDA run generated, then its findings, most severe first.
+
+    Text is printed as text, never as markup, because column names and messages can contain
+    square brackets.
+    """
+    rows, columns = dataset.data.shape
+    metrics = result.metrics
+    counts = [
+        f"{count} {severity}"
+        for severity, count in metrics["findings_by_severity"].items()
+        if count
+    ]
+    console.print(Text(f"Explore: {dataset.name} ({rows} rows, {columns} columns)", style="bold"))
+    console.print(Text(f"Settings: {_settings(result)}"))
+    console.print()
+    console.print(Text(f"Files: {len(result.artifacts)}", style="bold"))
+    for key, path in sorted(result.artifacts.items()):
+        console.print(Text(f"  {key}: {path}"))
+    console.print()
+    if not result.findings:
+        checks = ", ".join(metrics["checks_run"])
+        console.print(Text(f"No findings from: {checks}."))
+        return
+    console.print(Text(f"Findings: {len(result.findings)} ({', '.join(counts)})"))
+    for finding in result.findings:
+        console.print()
+        console.print(_finding_block(finding))
+
+
 def _settings(result: AnalysisResult) -> str:
     config = result.config
-    as_of = result.metrics["impossible_values"]["as_of"]
-    return (
+    text = (
         f"seed {config.random_seed}, row threshold {config.row_threshold}, "
-        f"column threshold {config.column_threshold}, dates after {as_of} count as future"
+        f"column threshold {config.column_threshold}"
     )
+    if "impossible_values" in result.metrics:
+        text += f", dates after {result.metrics['impossible_values']['as_of']} count as future"
+    return text
 
 
 def _finding_block(finding: Finding) -> Group:
