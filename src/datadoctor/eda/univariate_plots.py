@@ -53,6 +53,7 @@ def save_page(
 
 
 def draw_numeric(axis, column: dict[str, Any]) -> None:
+    """Draw one numeric column: bars per value if ``column["discrete"]``, a histogram otherwise."""
     discrete = column["discrete"]
     if discrete is not None:
         values, counts = discrete
@@ -110,6 +111,7 @@ def _draw_overflow(axis, shown: dict[str, Any], finite: np.ndarray, edges: np.nd
 
 
 def draw_categorical(axis, column: dict[str, Any]) -> None:
+    """Draw one categorical column as horizontal bars, most frequent first, "other" last."""
     counts = [entry["count"] for entry in column["top"]]
     labels = [entry.get("label") for entry in column["top"]]
     if column["other_count"]:

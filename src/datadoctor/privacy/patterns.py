@@ -36,6 +36,7 @@ _LETTER_RUN = re.compile(r"[^\W\d_]+")
 
 
 def is_email(value: str) -> bool:
+    """Whether a whole value is a single email address."""
     return "@" in value and EMAIL.fullmatch(value) is not None
 
 
@@ -57,6 +58,7 @@ def is_phone(value: str) -> bool:
 
 
 def has_embedded_phone(text: str) -> bool:
+    """Whether a longer text contains a phone-shaped run of digits, tested by ``is_phone``."""
     return any(is_phone(found.group()) for found in PHONE_EMBEDDED.finditer(text))
 
 
@@ -101,6 +103,7 @@ _NAME = re.compile(rf"{_WORD}(?: (?:van|von|de|der|da|di|del|la|le|bin|al|{_WORD
 
 
 def is_name(value: str) -> bool:
+    """Whether a whole value has the shape of a personal name: capitalized words, no digits."""
     return len(value) <= 60 and _NAME.fullmatch(value) is not None
 
 
@@ -150,14 +153,17 @@ def tokens(name: str) -> frozenset[str]:
 
 
 def names_email(words: frozenset[str]) -> bool:
+    """Whether a column name's words say it holds email addresses, such as ``email``."""
     return bool(words & EMAIL_TOKENS) and not words & NOT_THE_VALUE_TOKENS
 
 
 def names_phone(words: frozenset[str]) -> bool:
+    """Whether a column name's words say it holds phone numbers, such as ``mobile``."""
     return bool(words & PHONE_TOKENS) and not words & NOT_THE_VALUE_TOKENS
 
 
 def names_national_id(words: frozenset[str]) -> bool:
+    """Whether a column name's words say it holds a national identifier, such as ``ssn``."""
     named = bool(words & NATIONAL_ID_TOKENS) or any(
         set(pair) <= words for pair in NATIONAL_ID_PAIRS
     )
@@ -165,6 +171,7 @@ def names_national_id(words: frozenset[str]) -> bool:
 
 
 def names_free_text(words: frozenset[str]) -> bool:
+    """Whether a column name's words say it holds free text, such as ``comments``."""
     return bool(words & FREE_TEXT_TOKENS)
 
 

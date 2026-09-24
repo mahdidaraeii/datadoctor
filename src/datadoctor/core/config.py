@@ -51,10 +51,12 @@ class AnalysisConfig(JsonSerializable):
         object.__setattr__(self, "output_dir", Path(self.output_dir))
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the seed, both thresholds and ``output_dir`` as a POSIX path string."""
         data = {name: getattr(self, name) for name in _INT_FIELDS}
         return {**data, "output_dir": self.output_dir.as_posix()}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AnalysisConfig":
+        """Rebuild from a ``to_dict`` result. Every key is optional; missing ones use defaults."""
         require_keys("AnalysisConfig", data, optional=_FIELDS)
         return cls(**data)

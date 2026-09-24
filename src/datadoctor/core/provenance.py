@@ -130,6 +130,7 @@ class Provenance(JsonSerializable):
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Return every field as a plain dict, the nested ``config`` included."""
         return {
             "file_sha256": self.file_sha256,
             "file_size_bytes": self.file_size_bytes,
@@ -150,6 +151,7 @@ class Provenance(JsonSerializable):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Provenance":
+        """Rebuild from a ``to_dict`` result, rebuilding the nested ``config`` too."""
         require_keys("Provenance", data, required=_REQUIRED, optional=_OPTIONAL)
         return cls(**{**data, "config": AnalysisConfig.from_dict(data["config"])})
 

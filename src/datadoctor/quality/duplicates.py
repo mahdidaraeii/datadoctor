@@ -25,6 +25,8 @@ class RowDuplicates(NamedTuple):
 
 
 class IdentifierDuplicates(NamedTuple):
+    """A name-based identifier column whose values repeat, exactly or in conflict."""
+
     name: str
     confidence: float
     duplicated_values: int

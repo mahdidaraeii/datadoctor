@@ -50,6 +50,7 @@ def grade(rate: float) -> Severity | None:
 
 
 def plural(count: int, word: str) -> str:
+    """``word`` as-is for a count of 1, with a trailing ``s`` otherwise."""
     return word if count == 1 else f"{word}s"
 
 

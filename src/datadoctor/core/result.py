@@ -87,6 +87,7 @@ class Finding(JsonSerializable):
         object.__setattr__(self, "affected_columns", tuple(self.affected_columns))
 
     def to_dict(self) -> dict[str, Any]:
+        """Return every field as a plain dict, ``severity`` as its string value."""
         return {
             "category": self.category,
             "severity": self.severity.value,
@@ -101,6 +102,7 @@ class Finding(JsonSerializable):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Finding":
+        """Rebuild from a ``to_dict`` result. Raises if ``severity`` is not a known value."""
         require_keys("Finding", data, required=_FINDING_REQUIRED, optional=_FINDING_OPTIONAL)
         try:
             severity = Severity(data["severity"])
@@ -160,6 +162,7 @@ class AnalysisResult(JsonSerializable):
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Return every field as a plain dict, ``findings`` and ``config`` recursively."""
         return {
             "findings": [finding.to_dict() for finding in self.findings],
             "metrics": copy.deepcopy(self.metrics),
@@ -169,6 +172,7 @@ class AnalysisResult(JsonSerializable):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AnalysisResult":
+        """Rebuild from a ``to_dict`` result. Every key is optional; missing ones use defaults."""
         optional = ("findings", "metrics", "artifacts", "config")
         require_keys("AnalysisResult", data, optional=optional)
         config = data.get("config")
