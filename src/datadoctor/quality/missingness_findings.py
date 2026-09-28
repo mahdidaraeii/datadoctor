@@ -22,6 +22,9 @@ CODE_PATTERN = r"[A-Z]{2,3}"
 CODE_SHARE = 0.95
 # How many names or pairs a finding spells out. The rest are counted.
 LISTED = 5
+# The target-missingness finding's title, public so other modules (diagnostics.readiness) can
+# recognize it without hardcoding the string.
+TARGET_MISSING_TITLE = "Target column has missing values"
 
 REASONS = {
     "pairwise_skipped": "pairwise analyses were skipped because of the column threshold",
@@ -67,7 +70,7 @@ def rate_finding(name: str, count: int, n_rows: int, is_target: bool) -> Finding
             category="missingness",
             severity=Severity.HIGH if raised else severity,
             confidence=1.0,
-            title="Target column has missing values",
+            title=TARGET_MISSING_TITLE,
             evidence=evidence,
             interpretation=(
                 "Rows without a target value cannot be used to train or evaluate a supervised "

@@ -7,6 +7,12 @@ from datadoctor.core.result import Finding, Severity
 
 LISTED = 5
 
+# Titles, public so other modules (diagnostics.readiness) can recognize a specific finding
+# without hardcoding the string.
+NEAR_PERFECT_TITLE = "A feature is a near-perfect single-column predictor"
+DUPLICATE_TITLE = "A feature appears to be the target under another name or encoding"
+NAMING_TITLE = "A column name suggests a post-outcome event"
+
 
 def _listed(names: list[str]) -> str:
     text = ", ".join(names[:LISTED])
@@ -20,7 +26,7 @@ def near_perfect_predictor_finding(columns: list[str], threshold: float) -> Find
         category="leakage",
         severity=Severity.HIGH,
         confidence=0.6,
-        title="A feature is a near-perfect single-column predictor",
+        title=NEAR_PERFECT_TITLE,
         evidence=(
             f"{_listed(columns)} {'have' if plural else 'has'} an association with the target "
             f"of at least {threshold:.2f}, on the same 0 to 1 scale as an absolute correlation "
@@ -58,7 +64,7 @@ def duplicated_target_finding(columns: list[str], threshold: float) -> Finding:
         category="leakage",
         severity=Severity.CRITICAL,
         confidence=0.9,
-        title="A feature appears to be the target under another name or encoding",
+        title=DUPLICATE_TITLE,
         evidence=(
             f"{_listed(columns)} {'have' if plural else 'has'} an association with the target "
             f"of at least {threshold:.3f}, on the same scale as an absolute correlation."
@@ -87,7 +93,7 @@ def suspicious_naming_finding(columns: list[str]) -> Finding:
         category="leakage",
         severity=Severity.MEDIUM,
         confidence=0.3,
-        title="A column name suggests a post-outcome event",
+        title=NAMING_TITLE,
         evidence=(
             f"{_listed(columns)} {'have' if plural else 'has'} a name suggesting a value "
             "recorded at or after the outcome, such as a cancellation, closure, discharge or "

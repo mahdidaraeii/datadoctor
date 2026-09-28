@@ -13,6 +13,9 @@ from datadoctor.quality.codes import MISSING, column_codes
 NEAR_CONSTANT_SHARE = 0.99
 # How many column names a finding spells out. The rest are counted, and all are in the metrics.
 LISTED = 5
+# The constant-target finding's title, public so other modules (diagnostics.readiness) can
+# recognize it without hardcoding the string.
+CONSTANT_TARGET_TITLE = "Target column is constant"
 
 
 def check_constants(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
@@ -129,7 +132,7 @@ def _constant_target_finding(column: dict, n_rows: int) -> Finding:
         category="constants",
         severity=Severity.CRITICAL,
         confidence=1.0,
-        title="Target column is constant",
+        title=CONSTANT_TARGET_TITLE,
         evidence=(
             f"Column {name} has a single value in all {column['non_null']:,} of its non-null "
             f"values ({column['missing']:,} of {n_rows:,} rows are missing)."

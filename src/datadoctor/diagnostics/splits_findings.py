@@ -7,6 +7,13 @@ from datadoctor.core.result import Finding, Severity
 
 LISTED = 5
 
+# Titles, public so other modules (diagnostics.readiness) can recognize a specific finding
+# without hardcoding the string.
+TEMPORAL_TITLE = "A random split would leak future information"
+GROUPED_TITLE = "A random split could leak an entity across train and test"
+SMALL_N_TITLE = "Too few rows for a stable train/test split"
+STRATIFIED_TITLE = "Stratified splitting is recommended for this target"
+
 
 def _listed(names: list[str]) -> str:
     text = ", ".join(names[:LISTED])
@@ -20,7 +27,7 @@ def temporal_split_finding(columns: list[str]) -> Finding:
         category="split_strategy",
         severity=Severity.HIGH,
         confidence=1.0,
-        title="A random split would leak future information",
+        title=TEMPORAL_TITLE,
         evidence=(
             f"The target is associated with {_listed(columns)}, "
             f"{'date or time columns' if plural else 'a date or time column'}, beyond a small "
@@ -48,7 +55,7 @@ def grouped_split_finding(columns: list[str], confidence: float) -> Finding:
         category="split_strategy",
         severity=Severity.HIGH,
         confidence=confidence,
-        title="A random split could leak an entity across train and test",
+        title=GROUPED_TITLE,
         evidence=(
             f"{_listed(columns)}, identified as a likely entity column by name and repeated "
             f"values, {'are' if plural else 'is'} associated with the target beyond a small "
@@ -75,7 +82,7 @@ def small_n_finding(n_rows: int, expected_test_rows: float, severity: Severity) 
         category="split_strategy",
         severity=severity,
         confidence=1.0,
-        title="Too few rows for a stable train/test split",
+        title=SMALL_N_TITLE,
         evidence=(
             f"{n_rows} rows. A conventional test split would hold about "
             f"{expected_test_rows:.0f} of them."
@@ -98,7 +105,7 @@ def stratified_split_finding(minority_share: float, severity: Severity) -> Findi
         category="split_strategy",
         severity=severity,
         confidence=1.0,
-        title="Stratified splitting is recommended for this target",
+        title=STRATIFIED_TITLE,
         evidence=f"The smallest class holds {minority_share:.1%} of the rows.",
         interpretation=(
             "A plain random split can under- or over-represent the minority class in the test "
