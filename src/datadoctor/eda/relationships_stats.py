@@ -132,6 +132,87 @@ def cramers_v(a_codes: np.ndarray, b_codes: np.ndarray) -> CramersV | None:
     return CramersV(v, p)
 
 
+class ColumnAssociation(NamedTuple):
+    """One column's association with the target: which statistic, and its value and p-value.
+
+    ``effect`` is always on the same 0 to 1 scale as an absolute correlation, whichever
+    statistic produced it: Pearson's own absolute value, the correlation ratio (the square root
+    of eta-squared, not eta-squared itself), or Cramer's V. A threshold applied to ``effect``
+    means the same thing regardless of which kind of column pair produced it. ``p`` is the raw
+    significance, not yet adjusted for how many columns were tested; that adjustment is the
+    caller's job, since it depends on how many other columns it also tested.
+    """
+
+    kind: str
+    effect: float
+    p: float
+
+
+def column_association(
+    series: pd.Series,
+    numeric: bool,
+    task: str,
+    target_values: np.ndarray | None,
+    target_codes: np.ndarray | None,
+) -> ColumnAssociation | None:
+    """A single column's association with the target, dispatched by its type and the target's.
+
+    ``numeric`` is whether ``series`` itself is numeric; a categorical or boolean column passes
+    ``False``. ``task`` is ``"regression"`` (the target is ``target_values``, a plain numeric
+    array) or anything else (the target is ``target_codes``, from ``pandas.factorize``, with a
+    negative code marking a missing value). Numeric against numeric is Pearson correlation,
+    numeric against categorical is the correlation ratio, categorical against categorical is
+    Cramer's V.
+
+    Returns ``None`` when there is not enough overlapping, varying data to compute the statistic
+    reliably. This does not check ``series``'s cardinality: a categorical column with too many
+    distinct values to test meaningfully (see ``MAX_CATEGORIES``) is the caller's concern, to be
+    checked before calling this, since a good reason to skip a column is not the same as this
+    function being unable to compute an answer.
+    """
+    if numeric:
+        feature = series.to_numpy(dtype="float64", na_value=np.nan)
+        if task == "regression":
+            pearson = _pearson(feature, target_values)
+            if pearson is None:
+                return None
+            return ColumnAssociation("pearson", pearson[0], pearson[1])
+        mask = np.isfinite(feature) & (target_codes >= 0)
+        result = eta_squared(feature[mask], target_codes[mask])
+        if result is None:
+            return None
+        return ColumnAssociation("eta_squared", float(np.sqrt(result.eta2)), result.p)
+
+    codes, _ = pd.factorize(series)
+    if task == "regression":
+        mask = (codes >= 0) & np.isfinite(target_values)
+        result = eta_squared(target_values[mask], codes[mask])
+        if result is None:
+            return None
+        return ColumnAssociation("eta_squared", float(np.sqrt(result.eta2)), result.p)
+    mask = (codes >= 0) & (target_codes >= 0)
+    result = cramers_v(codes[mask], target_codes[mask])
+    if result is None:
+        return None
+    return ColumnAssociation("cramers_v", result.v, result.p)
+
+
+def _pearson(a: np.ndarray, b: np.ndarray) -> tuple[float, float] | None:
+    """A feature's Pearson correlation and p-value against a target, or ``None`` if unreliable.
+
+    ``None`` below ``MIN_PAIRS`` rows with both values present, or if either side has no
+    variance there, since the correlation is undefined.
+    """
+    mask = np.isfinite(a) & np.isfinite(b)
+    if mask.sum() < MIN_PAIRS:
+        return None
+    x, y = a[mask], b[mask]
+    if x.std() == 0 or y.std() == 0:
+        return None
+    r, p = stats.pearsonr(x, y)
+    return float(r), float(p)
+
+
 def wide_fence_range(finite: np.ndarray, q1: float, q3: float) -> dict[str, float | int] | None:
     """The range a histogram of ``finite`` should cover, if a few extreme values would squeeze
     the rest of it into a few bars.

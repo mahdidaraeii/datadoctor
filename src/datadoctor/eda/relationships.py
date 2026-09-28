@@ -10,7 +10,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from datadoctor.core.config import AnalysisConfig
 from datadoctor.core.dataset import Dataset
@@ -252,6 +251,7 @@ def _associations(
     records: list[tuple[str, str, float, float]] = []  # name, kind, effect, p
     not_tested: list[dict[str, str]] = []
 
+    target_values, target_codes = None, None
     if task == "regression":
         target_values = target_series.to_numpy(dtype="float64", na_value=np.nan)
     else:
@@ -260,41 +260,19 @@ def _associations(
     for position, name in enumerate(names):
         if position == target_position or kinds[position] not in _ASSOCIATION_TYPES:
             continue
-        if kinds[position] == "numeric":
-            feature = sample.iloc[:, position].to_numpy(dtype="float64", na_value=np.nan)
-            if task == "regression":
-                pearson = _pearson(feature, target_values)
-                if pearson is None:
-                    not_tested.append({"name": name, "reason": "not_enough_data"})
-                else:
-                    records.append((name, "pearson", pearson[0], pearson[1]))
-            else:
-                mask = np.isfinite(feature) & (target_codes >= 0)
-                result = stat.eta_squared(feature[mask], target_codes[mask])
-                if result is None:
-                    not_tested.append({"name": name, "reason": "not_enough_data"})
-                else:
-                    records.append((name, "eta_squared", float(np.sqrt(result.eta2)), result.p))
-        else:
+        numeric = kinds[position] == "numeric"
+        if not numeric:
             distinct = sample.iloc[:, position].nunique(dropna=True)
             if distinct > stat.MAX_CATEGORIES:
                 not_tested.append({"name": name, "reason": "too_many_categories"})
                 continue
-            codes, _ = pd.factorize(sample.iloc[:, position])
-            if task == "regression":
-                mask = (codes >= 0) & np.isfinite(target_values)
-                result = stat.eta_squared(target_values[mask], codes[mask])
-                if result is None:
-                    not_tested.append({"name": name, "reason": "not_enough_data"})
-                else:
-                    records.append((name, "eta_squared", float(np.sqrt(result.eta2)), result.p))
-            else:
-                mask = (codes >= 0) & (target_codes >= 0)
-                result = stat.cramers_v(codes[mask], target_codes[mask])
-                if result is None:
-                    not_tested.append({"name": name, "reason": "not_enough_data"})
-                else:
-                    records.append((name, "cramers_v", result.v, result.p))
+        result = stat.column_association(
+            sample.iloc[:, position], numeric, task, target_values, target_codes
+        )
+        if result is None:
+            not_tested.append({"name": name, "reason": "not_enough_data"})
+        else:
+            records.append((name, result.kind, result.effect, result.p))
 
     tests_run = len(records)
     associations = [
@@ -302,22 +280,6 @@ def _associations(
         for name, kind, effect, p in records
     ]
     return associations, not_tested
-
-
-def _pearson(a: np.ndarray, b: np.ndarray) -> tuple[float, float] | None:
-    """A feature's Pearson correlation and p-value against the target, or ``None`` if unreliable.
-
-    ``None`` below ``stat.MIN_PAIRS`` rows with both values present, or if either side has no
-    variance there, since the correlation is undefined.
-    """
-    mask = np.isfinite(a) & np.isfinite(b)
-    if mask.sum() < stat.MIN_PAIRS:
-        return None
-    x, y = a[mask], b[mask]
-    if x.std() == 0 or y.std() == 0:
-        return None
-    r, p = stats.pearsonr(x, y)
-    return float(r), float(p)
 
 
 def _is_discrete_numeric(series: pd.Series) -> bool:
