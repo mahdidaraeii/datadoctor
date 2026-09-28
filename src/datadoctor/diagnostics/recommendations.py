@@ -47,8 +47,17 @@ Ranking is severity first, then confidence, both descending, extending ``sort_fi
 principle across analyzers rather than within one. Ties beyond that keep the fixed order the
 analyzers are read in: quality, eda, splits, leakage, readiness -- the same "stable sort over a
 documented order" mechanism ``quality.run``'s own merged findings list already relies on.
+
+``Recommendation.to_finding`` flattens one entry back into a single ``Finding``, for callers
+(``diagnostics.run``, S30) that want recommendations as their primary ``findings`` output rather
+than a separate structure. Title comes from the first source finding; evidence, interpretation,
+limitations and recommendation text are each joined across every source, so a merge never drops
+a reason a caller reading only the flattened form would otherwise lose; severity and confidence
+are the ones already computed onto the ``Recommendation`` itself. Title and severity can come
+from different sources when they disagree -- the flattened form is a summary, not a rewrite.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -128,6 +137,30 @@ class Recommendation(JsonSerializable):
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "findings", tuple(self.findings))
         ensure_json_roundtrip("Recommendation.confidence", self.confidence)
+
+    def to_finding(self) -> Finding:
+        """Flatten this recommendation into one ``Finding``.
+
+        See the module docstring for what is joined, what is kept as-is, and why the title and
+        severity can come from different source findings when this entry is a merge.
+        """
+        return Finding(
+            category="recommendation",
+            severity=self.severity,
+            confidence=self.confidence,
+            title=self.findings[0].title,
+            evidence=_join(f.evidence for f in self.findings),
+            interpretation=_join(f.interpretation for f in self.findings),
+            limitations=_join(f.limitations for f in self.findings),
+            affected_columns=self.columns,
+            recommendation=_join(f.recommendation for f in self.findings) or None,
+        )
+
+
+def _join(texts: Iterable[str | None]) -> str:
+    # dict.fromkeys drops an exact repeat (both sources phrasing a fact identically) while
+    # keeping the order the source findings were read in.
+    return "; ".join(dict.fromkeys(text for text in texts if text))
 
 
 def build_recommendations(

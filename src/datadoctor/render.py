@@ -86,6 +86,39 @@ def render_explore(console: Console, dataset: Dataset, result: AnalysisResult) -
         console.print(_finding_block(finding))
 
 
+def render_diagnose(console: Console, dataset: Dataset, result: AnalysisResult) -> None:
+    """Print the diagnose findings, most severe first, with the settings they ran under.
+
+    Text is printed as text, never as markup, because column names and messages can contain
+    square brackets.
+    """
+    rows, columns = dataset.data.shape
+    metrics = result.metrics
+    counts = [
+        f"{count} {severity}"
+        for severity, count in metrics["findings_by_severity"].items()
+        if count
+    ]
+    console.print(Text(f"Diagnose: {dataset.name} ({rows} rows, {columns} columns)", style="bold"))
+    console.print(Text(f"Settings: {_settings(result)}"))
+    console.print(
+        Text(
+            "Covers: split strategy, leakage and readiness only. Quality and eda findings are "
+            "not repeated here -- run `quality` and `explore` for those."
+        )
+    )
+    console.print()
+    if not result.findings:
+        console.print(Text("No findings from: split strategy, leakage, readiness."))
+        console.print(Text("This means these checks found nothing at their thresholds."))
+        console.print(Text("It does not show that the data is clean or ready to model."))
+        return
+    console.print(Text(f"Findings: {len(result.findings)} ({', '.join(counts)})"))
+    for finding in result.findings:
+        console.print()
+        console.print(_finding_block(finding))
+
+
 def _settings(result: AnalysisResult) -> str:
     config = result.config
     text = (

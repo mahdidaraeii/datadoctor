@@ -12,10 +12,11 @@ from datadoctor import AnalysisConfig, __version__, load_dataset
 from datadoctor.core.dataset import Dataset
 from datadoctor.core.exceptions import DataDoctorError
 from datadoctor.core.result import AnalysisResult
+from datadoctor.diagnostics import run_diagnostics
 from datadoctor.eda import run_eda
 from datadoctor.profiling.schema import profile_schema
 from datadoctor.quality import run_quality_checks
-from datadoctor.render import render_explore, render_profile, render_quality
+from datadoctor.render import render_diagnose, render_explore, render_profile, render_quality
 
 app = typer.Typer(
     help="A diagnostic workbench for tabular datasets.",
@@ -196,6 +197,50 @@ def explore(
         _fail(str(exc))
 
     render_explore(Console(), dataset, result)
+
+
+@app.command()
+def diagnose(
+    path: Annotated[Path, typer.Argument(metavar="PATH", help="The data file to diagnose.")],
+    target: Target = None,
+    file_format: FileFormat = None,
+    separator: Separator = None,
+    encoding: Encoding = None,
+    sheet: Sheet = None,
+    text_column: TextColumn = None,
+    json_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--json", help="Write the result to this file as JSON instead of printing it."
+        ),
+    ] = None,
+) -> None:
+    """Assess split strategy, leakage and ML readiness, and rank them into recommendations.
+
+    Does not repeat the full quality or eda finding sets -- run `quality` and `explore` for
+    those.
+    """
+    config = AnalysisConfig()
+    try:
+        dataset = load_dataset(
+            path,
+            file_format=file_format,
+            target=target,
+            separator=separator,
+            encoding=encoding,
+            sheet=sheet,
+            text_columns=text_column,
+            config=config,
+        )
+        result = run_diagnostics(dataset, config)
+    except DataDoctorError as exc:
+        _fail(str(exc))
+
+    if json_path is None:
+        render_diagnose(Console(), dataset, result)
+        return
+    _write_json(json_path, dataset, "diagnose", result)
+    typer.echo(f"Wrote diagnose report to {json_path}")
 
 
 def _write_json(path: Path, dataset: Dataset, key: str, result: AnalysisResult) -> None:

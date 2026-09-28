@@ -7,8 +7,10 @@ from typer.testing import CliRunner
 
 from datadoctor import AnalysisConfig, AnalysisResult, Provenance, __version__, load_dataset
 from datadoctor.cli import app
+from datadoctor.diagnostics import run_diagnostics
 from datadoctor.profiling.schema import profile_schema
 from datadoctor.quality import run_quality_checks
+from datadoctor.testing.synthetic import SyntheticConfig, make_synthetic_dataset
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE = FIXTURES / "sample.csv"
@@ -575,6 +577,119 @@ class TestExploreFailures:
         path.write_text("a,b\n", encoding="utf-8", newline="")
 
         result = run("explore", path)
+
+        assert result.exit_code == 1
+        assert "error: " in result.output
+        assert "no data rows" in result.output
+        assert "Traceback" not in result.output
+
+
+def diagnose_csv(tmp_path):
+    """A synthetic dataset (S25) with planted duplicate-target leakage, written to CSV."""
+    sc = SyntheticConfig(n_rows=500, n_features=3, random_seed=1)
+    dataset = make_synthetic_dataset(sc, leakage="duplicate").dataset
+    path = tmp_path / "diagnose.csv"
+    dataset.data.to_csv(path, index=False)
+    return path
+
+
+class TestDiagnoseOutput:
+    def test_exit_0_and_the_planted_leakage_finding_is_reported(self, tmp_path):
+        result = run("diagnose", diagnose_csv(tmp_path), "--target", "target")
+
+        assert result.exit_code == 0
+        assert "A feature appears to be the target under another name or encoding" in result.output
+
+    def test_the_header_states_the_scope(self, tmp_path):
+        output = run("diagnose", diagnose_csv(tmp_path), "--target", "target").output
+
+        assert (
+            "Covers: split strategy, leakage and readiness only. Quality and eda findings are "
+            "not repeated here -- run `quality` and `explore` for those."
+        ) in output
+
+    def test_quality_only_findings_are_not_shown_even_when_something_else_is(self, tmp_path):
+        # This target also trips quality's own findings (missing target values, numbers stored
+        # as text, a constant column) and split_strategy's small-n finding. Only the latter is
+        # diagnose's to report.
+        output = run("quality", defects_csv(tmp_path), "--target", "score").output
+        result = run("diagnose", defects_csv(tmp_path), "--target", "score")
+
+        assert "Too few rows for a stable train/test split" in result.output
+        for title in [
+            "Target column has missing values",
+            "Numbers stored as text",
+            "Constant columns",
+        ]:
+            assert title in output  # sanity: quality does report it
+            assert title not in result.output  # diagnose does not repeat it
+
+    def test_no_findings_is_reported_as_the_checks_that_found_nothing(self, tmp_path):
+        # 150+ rows, so split_strategy's own row-count check (independent of any target) has
+        # nothing to say either; clean_csv's 100 rows would otherwise trip it on its own.
+        lines = ["x,y,city"]
+        for k in range(150):
+            lines.append(
+                f"{k * 37 % 101},{k * 53 % 97 * 1.5},{['Oslo', 'Paris', 'Rome', 'Lima'][k % 4]}"
+            )
+        path = tmp_path / "large_clean.csv"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+
+        result = run("diagnose", path)
+
+        assert result.exit_code == 0
+        assert "No findings from: split strategy, leakage, readiness." in result.output
+        assert "It does not show that the data is clean or ready to model." in result.output
+        assert "Findings:" not in result.output
+
+
+class TestDiagnoseJson:
+    def test_json_flag_writes_a_file_instead_of_printing_findings(self, tmp_path):
+        out = tmp_path / "diagnose.json"
+
+        result = run("diagnose", diagnose_csv(tmp_path), "--target", "target", "--json", out)
+
+        assert result.exit_code == 0
+        assert "Wrote diagnose report to" in result.output
+        assert "Findings:" not in result.output
+        assert out.exists()
+
+    def test_file_holds_dataset_provenance_and_diagnose_side_by_side(self, tmp_path):
+        path = diagnose_csv(tmp_path)
+        out = tmp_path / "diagnose.json"
+        run("diagnose", path, "--target", "target", "--json", out)
+
+        document = json.loads(out.read_text(encoding="utf-8"))
+
+        assert set(document) == {"dataset", "provenance", "diagnose"}
+        assert document["dataset"]["target"] == "target"
+        dataset = load_dataset(path, target="target")
+        expected = run_diagnostics(dataset, AnalysisConfig())
+        assert AnalysisResult.from_dict(document["diagnose"]) == expected
+
+    def test_unwritable_path_is_a_clean_error(self, tmp_path):
+        result = run("diagnose", diagnose_csv(tmp_path), "--json", tmp_path / "gone" / "out.json")
+
+        assert result.exit_code == 1
+        assert "error: cannot write" in result.output
+        assert "Traceback" not in result.output
+
+
+class TestDiagnoseFailures:
+    def test_a_load_error_is_one_line_and_exit_one(self, tmp_path):
+        result = run("diagnose", tmp_path / "nope.csv")
+
+        assert result.exit_code == 1
+        assert "error: file not found" in result.output
+        assert "Traceback" not in result.output
+
+    def test_a_dataset_with_no_rows_is_a_clean_error(self, tmp_path):
+        # The loader itself refuses an empty file, so run_diagnostics's own guard is never
+        # reached here; that guard is exercised directly in tests/diagnostics/test_run.py.
+        path = tmp_path / "empty.csv"
+        path.write_text("a,b\n", encoding="utf-8", newline="")
+
+        result = run("diagnose", path)
 
         assert result.exit_code == 1
         assert "error: " in result.output

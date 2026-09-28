@@ -9,16 +9,26 @@ EDA_IMBALANCE_TITLE = "The target classes are imbalanced"
 STRATIFIED_TITLE = "Stratified splitting is recommended for this target"
 
 
-def f(category, title, severity, confidence=1.0, columns=()):
+def f(
+    category,
+    title,
+    severity,
+    confidence=1.0,
+    columns=(),
+    evidence="evidence",
+    limitations="limitations",
+    recommendation=None,
+):
     return Finding(
         category=category,
         severity=severity,
         confidence=confidence,
         title=title,
-        evidence="evidence",
+        evidence=evidence,
         interpretation="interpretation",
-        limitations="limitations",
+        limitations=limitations,
         affected_columns=columns,
+        recommendation=recommendation,
     )
 
 
@@ -198,6 +208,72 @@ class TestSerialization:
 
         assert Recommendation.from_json(rec.to_json()) == rec
         assert len(Recommendation.from_json(rec.to_json()).findings) == 2
+
+
+class TestToFinding:
+    def test_a_singleton_flattens_with_its_own_fields_unchanged(self):
+        finding = f(
+            "outliers",
+            "Outlier candidates in numeric columns",
+            Severity.LOW,
+            confidence=0.4,
+            columns=("age",),
+        )
+        (rec,) = build(quality=(finding,))
+
+        flattened = rec.to_finding()
+
+        assert flattened.category == "recommendation"
+        assert flattened.severity == Severity.LOW
+        assert flattened.confidence == 0.4
+        assert flattened.title == "Outlier candidates in numeric columns"
+        assert flattened.evidence == "evidence"
+        assert flattened.affected_columns == ("age",)
+
+    def test_a_merge_joins_evidence_from_both_sources_and_takes_the_first_title(self):
+        eda_finding = f(
+            "eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",), evidence="eda evidence"
+        )
+        splits_finding = f(
+            "split_strategy",
+            STRATIFIED_TITLE,
+            Severity.MEDIUM,
+            columns=("y",),
+            evidence="splits evidence",
+        )
+
+        (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
+
+        flattened = rec.to_finding()
+
+        assert flattened.title == EDA_IMBALANCE_TITLE  # eda is read before splits
+        assert flattened.evidence == "eda evidence; splits evidence"
+        assert flattened.severity == Severity.MEDIUM  # the winning (higher) severity
+        assert flattened.affected_columns == ("y",)
+
+    def test_a_merge_keeps_duplicate_text_only_once(self):
+        eda_finding = f(
+            "eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",), limitations="same text"
+        )
+        splits_finding = f(
+            "split_strategy",
+            STRATIFIED_TITLE,
+            Severity.MEDIUM,
+            columns=("y",),
+            limitations="same text",
+        )
+
+        (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
+
+        assert rec.to_finding().limitations == "same text"
+
+    def test_no_recommendation_text_from_either_source_gives_none(self):
+        eda_finding = f("eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",))
+        splits_finding = f("split_strategy", STRATIFIED_TITLE, Severity.MEDIUM, columns=("y",))
+
+        (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
+
+        assert rec.to_finding().recommendation is None
 
 
 class TestValidation:
