@@ -241,7 +241,7 @@ def _check_stratification(target_series: pd.Series) -> tuple[dict | None, Findin
     if severity is None:
         return {"minority_share": minority_share, "flagged": False}, None
     return {"minority_share": minority_share, "flagged": True}, report.stratified_split_finding(
-        minority_share, severity
+        target_series.name, minority_share, severity
     )
 
 

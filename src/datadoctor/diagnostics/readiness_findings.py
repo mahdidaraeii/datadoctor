@@ -11,6 +11,13 @@ from datadoctor.diagnostics.splits_findings import GROUPED_TITLE, TEMPORAL_TITLE
 
 LISTED = 5
 
+# The target-type finding's title, public so other modules (diagnostics.recommendations) can
+# recognize it without hardcoding the string. check_readiness's other finding, the headline, has
+# no such constant on purpose: its text is dynamic (the blocking count), and recommendations
+# identifies it by elimination -- everything from readiness that is not this title -- rather
+# than by matching a title that varies.
+TARGET_UNUSABLE_TITLE = "Target column's type cannot be modeled"
+
 # The source finding's own title, softened for readiness's summary where the title as written
 # would overstate what was actually found. The split-strategy check found an association
 # between the time column and the target, not a certainty that the split leaks; only this one
@@ -55,7 +62,7 @@ def target_unusable_finding(name: str, kind: str) -> Finding:
         category="readiness",
         severity=Severity.CRITICAL,
         confidence=1.0,
-        title="Target column's type cannot be modeled",
+        title=TARGET_UNUSABLE_TITLE,
         evidence=(
             f"Column {name} is typed {kind}, which this project does not treat as a regression "
             "or classification target."

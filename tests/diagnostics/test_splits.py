@@ -308,6 +308,16 @@ class TestStratification:
         assert found.severity == Severity.MEDIUM
         assert "3.0%" in found.evidence
 
+    def test_the_finding_names_the_target_column(self):
+        # diagnostics.recommendations (S29) matches this finding against eda's class-imbalance
+        # finding by affected_columns; an empty tuple here would make that match vacuous.
+        dataset = Dataset(data=imbalanced_frame(6, 194), name="rare", target="target")
+
+        result = check_split_strategy(dataset, CONFIG)
+
+        found = finding(result, "Stratified splitting is recommended for this target")
+        assert found.affected_columns == ("target",)
+
     def test_a_moderately_small_minority_class_is_low_severity(self):
         dataset = Dataset(data=imbalanced_frame(16, 184), name="mild", target="target")
 

@@ -99,7 +99,7 @@ def small_n_finding(n_rows: int, expected_test_rows: float, severity: Severity) 
     )
 
 
-def stratified_split_finding(minority_share: float, severity: Severity) -> Finding:
+def stratified_split_finding(name: str, minority_share: float, severity: Severity) -> Finding:
     """A classification target's minority class is small enough to warrant stratification."""
     return Finding(
         category="split_strategy",
@@ -112,5 +112,6 @@ def stratified_split_finding(minority_share: float, severity: Severity) -> Findi
             "set by chance, especially with a small test set."
         ),
         limitations="The severity thresholds here are the same conventions used elsewhere.",
+        affected_columns=(name,),
         recommendation="Use stratified sampling for train/test splits and cross-validation.",
     )

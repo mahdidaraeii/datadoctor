@@ -8,6 +8,10 @@ from datadoctor.core.result import Finding, Severity
 
 # How many pairs or names a finding spells out. The rest are counted, and all are in the metrics.
 LISTED = 5
+# Titles, public so other modules (diagnostics.recommendations) can recognize a specific finding
+# without hardcoding the string.
+IMBALANCE_TITLE = "The target classes are imbalanced"
+TARGET_UNUSABLE_TITLE = "The target could not be compared against the other columns"
 
 _NOT_USED_REASONS = {
     "identifier": "identifiers, where every value is different",
@@ -108,7 +112,7 @@ def top_predictors_finding(associations: list[dict]) -> Finding:
 
 
 def class_imbalance_finding(
-    label: str | None, minority_share: float, severity: Severity
+    name: str, label: str | None, minority_share: float, severity: Severity
 ) -> Finding:
     """The minority class of a classification target holds a small share of the rows."""
     named = f"'{label}' " if label is not None else ""
@@ -116,7 +120,7 @@ def class_imbalance_finding(
         category="eda",
         severity=severity,
         confidence=1.0,
-        title="The target classes are imbalanced",
+        title=IMBALANCE_TITLE,
         evidence=f"The smallest class {named}holds {minority_share:.1%} of the rows.",
         interpretation=(
             "Imbalance is expected for many real classification problems, such as churn, fraud "
@@ -126,6 +130,7 @@ def class_imbalance_finding(
             "than plain accuracy."
         ),
         limitations="The severity thresholds here are conventions, not a judgment on this data.",
+        affected_columns=(name,),
         recommendation=(
             "Use stratified sampling for train/test splits and cross-validation, and choose an "
             "evaluation metric that accounts for the imbalance."
@@ -186,7 +191,7 @@ def target_unusable_finding(name: str, kind: str) -> Finding:
         category="eda",
         severity=Severity.INFO,
         confidence=1.0,
-        title="The target could not be compared against the other columns",
+        title=TARGET_UNUSABLE_TITLE,
         evidence=(
             f"Column {name} is {_TARGET_UNUSABLE_REASONS[kind]}, so it was not used as a target "
             "here."

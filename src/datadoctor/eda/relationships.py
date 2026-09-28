@@ -214,7 +214,10 @@ def _target(
         if severity is not None:
             findings.append(
                 report.class_imbalance_finding(
-                    class_balance["minority_label"], class_balance["minority_share"], severity
+                    name,
+                    class_balance["minority_label"],
+                    class_balance["minority_share"],
+                    severity,
                 )
             )
     else:

@@ -696,6 +696,15 @@ class TestImbalanceThresholds:
 
         assert "The target classes are imbalanced" not in findings(result)
 
+    def test_the_finding_names_the_target_column(self, config, figures):
+        # Not just for its own sake: diagnostics.recommendations (S29) matches this finding
+        # against splits' stratification finding by affected_columns, and an empty tuple here
+        # would make that match vacuous rather than meaningful.
+        result = run(self.frame(4), config, target="y")
+
+        found = finding(result, "The target classes are imbalanced")
+        assert found.affected_columns == ("y",)
+
     def test_the_interpretation_says_imbalance_is_often_expected_and_recommends_stratifying(
         self, config, figures
     ):
