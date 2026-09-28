@@ -253,7 +253,7 @@ def _exact_group_effect(
     n_groups: int,
     strength: float,
     rng: np.random.RandomState,
-    base: np.ndarray | None = None,
+    base: np.ndarray,
 ) -> np.ndarray:
     """A standardized series whose eta-squared against ``group_ids`` is exactly ``strength``.
 
@@ -261,11 +261,15 @@ def _exact_group_effect(
     within each group, so all of its variance is between-group; the noise is centered within
     each group so none of its variance is. Mixing the two by ``sqrt(strength)``/
     ``sqrt(1 - strength)`` then gives an exact between-group variance share.
+
+    Unlike ``_exact_correlation``, ``base`` has no fresh-noise fallback: the latent it is mixed
+    with always exists by the time this runs (the base draw at the top of
+    ``make_synthetic_dataset`` is unconditional), so a ``base is None`` branch would never run.
     """
     group_effect = rng.normal(size=n_groups)
     signal = _standardize(group_effect[group_ids])
 
-    raw = rng.normal(size=group_ids.size) if base is None else np.asarray(base, dtype=float)
+    raw = np.asarray(base, dtype=float)
     group_means = pd.Series(raw).groupby(group_ids).transform("mean").to_numpy()
     noise = _standardize(raw - group_means)
 

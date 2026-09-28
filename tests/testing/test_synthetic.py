@@ -111,6 +111,49 @@ class TestDeterminism:
             pd.testing.assert_frame_equal(first.dataset.data, second.dataset.data)
 
 
+class TestPinnedOutput:
+    def test_exact_values_for_a_fixed_seed(self):
+        # Pinned from numpy's frozen RandomState stream, the same style as
+        # test_guardrails.py's row-selection pin. The exact-correlation and exact-eta-squared
+        # tests are blind to a bug that relabels which row or group gets which value (the
+        # aggregate statistic comes out the same either way), so this pins the actual per-row
+        # wiring: which date and which group each row lands on, not just the resulting
+        # association strength.
+        config = SyntheticConfig(n_rows=20, n_features=1, random_seed=7)
+
+        result = make_synthetic_dataset(
+            config,
+            temporal=True,
+            groups=4,
+            task="regression",
+            effect_sizes={"temporal": 0.5, "group": 0.5},
+        )
+        frame = result.dataset.data
+
+        assert frame["event_time"].astype(str).tolist()[:5] == [
+            "2020-01-14",
+            "2020-01-12",
+            "2020-01-03",
+            "2020-01-18",
+            "2020-01-19",
+        ]
+        assert frame["group_id"].tolist()[:5] == [
+            "group_003",
+            "group_000",
+            "group_001",
+            "group_003",
+            "group_003",
+        ]
+        np.testing.assert_allclose(
+            frame["target"].to_numpy()[:3],
+            [1.932120288838592, -1.4572189656606902, 0.2645942721362703],
+        )
+        np.testing.assert_allclose(
+            frame["feature_0"].to_numpy()[:3],
+            [2.1830908622109977, -1.3860041892375947, -1.77182221406411],
+        )
+
+
 class TestCleanDataset:
     def test_no_mechanism_columns_are_present_unless_requested(self):
         frame = make_synthetic_dataset(_config()).dataset.data
