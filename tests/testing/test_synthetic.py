@@ -199,6 +199,17 @@ class TestLeakageDuplicate:
 
         np.testing.assert_allclose(recovered.to_numpy(), frame["target"].to_numpy())
 
+    def test_regression_matches_the_final_target_even_with_label_noise(self):
+        # leak_duplicate must be built from the target after label noise is applied, not
+        # before: it is a duplicate of what is actually shipped as the target, flips included.
+        frame = make_synthetic_dataset(
+            _config(), leakage="duplicate", task="regression", label_noise=0.1
+        ).dataset.data
+
+        recovered = (frame["leak_duplicate"] - 7.0) / 1000.0
+
+        np.testing.assert_allclose(recovered.to_numpy(), frame["target"].to_numpy())
+
     def test_classification_is_a_bijection_with_the_target(self):
         frame = make_synthetic_dataset(
             _config(), leakage="duplicate", task="classification"
@@ -208,6 +219,36 @@ class TestLeakageDuplicate:
 
         assert pairs["target"].nunique() == len(pairs)
         assert pairs["leak_duplicate"].nunique() == len(pairs)
+
+    def test_classification_bijection_holds_even_with_label_noise(self):
+        # A leak_duplicate built from the pre-noise target would pair a flipped row's new class
+        # with the old class's label, breaking the bijection (two classes mapping to the same
+        # leak_duplicate label) rather than merely producing a stale-but-still-bijective mapping.
+        frame = make_synthetic_dataset(
+            _config(), leakage="duplicate", task="classification", label_noise=0.1
+        ).dataset.data
+
+        pairs = frame[["target", "leak_duplicate"]].drop_duplicates()
+
+        assert pairs["target"].nunique() == len(pairs)
+        assert pairs["leak_duplicate"].nunique() == len(pairs)
+
+    def test_classification_encoding_is_shuffled_not_just_relabeled(self):
+        # A bijection alone (the test above) does not rule out a trivial relabeling that keeps
+        # class_i's ordinal position, e.g. class_0 -> "L0", class_1 -> "L1"; that is still a
+        # bijection but is barely "a different encoding". n_classes=5 makes an accidental
+        # identity permutation astronomically unlikely (1 in 120) if the shuffle is real.
+        frame = make_synthetic_dataset(
+            _config(n_classes=5), leakage="duplicate", task="classification"
+        ).dataset.data
+
+        pairs = frame[["target", "leak_duplicate"]].drop_duplicates()
+        mapping = {
+            int(target.split("_")[1]): int(dup.removeprefix("L"))
+            for target, dup in pairs.itertuples(index=False)
+        }
+
+        assert any(code != label for code, label in mapping.items())
 
 
 class TestTemporal:
@@ -256,6 +297,16 @@ class TestLabelNoise:
 
         assert result.flipped_indices == ()
 
+    def test_the_flip_count_rounds_rather_than_truncates(self):
+        # 0.95 * 10 = 9.5, which rounds to 10 (Python's round-half-to-even) but truncates to 9;
+        # a test using a label_noise/n_rows product that is already a whole number cannot tell
+        # rounding and truncation apart.
+        result = make_synthetic_dataset(
+            SyntheticConfig(n_rows=10, n_features=1, random_seed=0), label_noise=0.95
+        )
+
+        assert len(result.flipped_indices) == 10
+
     def test_flipped_indices_are_exactly_the_rows_that_differ(self):
         clean = make_synthetic_dataset(_config()).dataset.data["target"].to_numpy()
         result = make_synthetic_dataset(_config(), label_noise=0.1)
@@ -274,6 +325,21 @@ class TestLabelNoise:
         differing = tuple(
             int(i) for i in np.flatnonzero(clean["target"].to_numpy() != noisy["target"].to_numpy())
         )
+
+        assert differing == result.flipped_indices
+
+    def test_regression_swap_partner_is_never_the_row_itself(self):
+        # Pinned: seed 0 at n_rows=10, label_noise=0.9 is a specific case, verified by direct
+        # search, where a partner draw without the self-pairing guard lands on its own row
+        # (rows 5 and 6 stay unchanged), so a real target actually changed for fewer rows than
+        # flipped_indices claims. A default-sized fixture does not reliably reproduce this: the
+        # collision is a matter of chance, not of the input size or noise fraction alone.
+        config = SyntheticConfig(n_rows=10, n_features=1, random_seed=0)
+        clean = make_synthetic_dataset(config, task="regression").dataset.data["target"].to_numpy()
+        result = make_synthetic_dataset(config, task="regression", label_noise=0.9)
+        noisy = result.dataset.data["target"].to_numpy()
+
+        differing = tuple(int(i) for i in np.flatnonzero(clean != noisy))
 
         assert differing == result.flipped_indices
 
