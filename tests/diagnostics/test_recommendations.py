@@ -2,6 +2,8 @@ import pytest
 
 from datadoctor.core.result import AnalysisResult, Finding, Severity
 from datadoctor.diagnostics.recommendations import Recommendation, build_recommendations
+from datadoctor.diagnostics.splits_findings import stratified_split_finding
+from datadoctor.eda.relationships_findings import class_imbalance_finding
 
 EDA_UNUSABLE_TITLE = "The target could not be compared against the other columns"
 READINESS_UNUSABLE_TITLE = "Target column's type cannot be modeled"
@@ -274,6 +276,108 @@ class TestToFinding:
         (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
 
         assert rec.to_finding().recommendation is None
+
+
+class TestJoinCollapsesNearRestates:
+    """The wine_quality.csv fixture: a classification target whose smallest class ('9') holds
+    0.1% of the rows. eda's and split_strategy's own finding builders, not hand-typed strings,
+    so this stays true to what those analyzers actually say."""
+
+    def eda_finding(self):
+        return class_imbalance_finding("quality", 9, 0.0010208248264597796, Severity.MEDIUM)
+
+    def splits_finding(self):
+        return stratified_split_finding("quality", 0.0010208248264597796, Severity.MEDIUM)
+
+    def test_recommendation_text_collapses_to_the_more_informative_sentence(self):
+        (rec,) = build(eda=(self.eda_finding(),), splits=(self.splits_finding(),))
+
+        assert rec.to_finding().recommendation == (
+            "Use stratified sampling for train/test splits and cross-validation, and choose an "
+            "evaluation metric that accounts for the imbalance."
+        )
+
+    def test_evidence_does_not_collapse_because_it_is_not_a_literal_substring(self):
+        # eda names the minority label ('9') in the middle of the sentence, splits does not, so
+        # neither text is a literal substring of the other even though both report the same
+        # 0.1% fact. This is the one sentence in this fixture the substring rule cannot join.
+        (rec,) = build(eda=(self.eda_finding(),), splits=(self.splits_finding(),))
+
+        assert rec.to_finding().evidence == (
+            "The smallest class '9' holds 0.1% of the rows.; "
+            "The smallest class holds 0.1% of the rows."
+        )
+
+    def test_limitations_do_not_collapse_because_they_say_different_things(self):
+        (rec,) = build(eda=(self.eda_finding(),), splits=(self.splits_finding(),))
+
+        limitations = rec.to_finding().limitations
+        assert "The severity thresholds here are conventions, not a judgment on this data." in (
+            limitations
+        )
+        assert "The severity thresholds here are the same conventions used elsewhere." in (
+            limitations
+        )
+
+
+class TestJoinSubstringRule:
+    def test_the_shorter_text_is_dropped_regardless_of_which_source_gives_it(self):
+        short_first = f("eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",), evidence="Short.")
+        long_second = f(
+            "split_strategy",
+            STRATIFIED_TITLE,
+            Severity.MEDIUM,
+            columns=("y",),
+            evidence="Short, with more detail.",
+        )
+        (short_first_rec,) = build(eda=(short_first,), splits=(long_second,))
+
+        long_first = f(
+            "eda",
+            EDA_IMBALANCE_TITLE,
+            Severity.LOW,
+            columns=("y",),
+            evidence="Short, with more detail.",
+        )
+        short_second = f(
+            "split_strategy", STRATIFIED_TITLE, Severity.MEDIUM, columns=("y",), evidence="Short."
+        )
+        (long_first_rec,) = build(eda=(long_first,), splits=(short_second,))
+
+        assert short_first_rec.to_finding().evidence == "Short, with more detail."
+        assert long_first_rec.to_finding().evidence == "Short, with more detail."
+
+    def test_a_trailing_period_only_difference_still_collapses(self):
+        with_period = f(
+            "eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",), evidence="Same fact."
+        )
+        without_period = f(
+            "split_strategy",
+            STRATIFIED_TITLE,
+            Severity.MEDIUM,
+            columns=("y",),
+            evidence="Same fact",
+        )
+
+        (rec,) = build(eda=(with_period,), splits=(without_period,))
+
+        assert rec.to_finding().evidence == "Same fact."
+
+    def test_genuinely_different_text_is_never_touched(self):
+        eda_finding = f(
+            "eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",), evidence="Fact one."
+        )
+        splits_finding = f(
+            "split_strategy",
+            STRATIFIED_TITLE,
+            Severity.MEDIUM,
+            columns=("y",),
+            evidence="A completely unrelated fact.",
+        )
+
+        (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
+
+        assert rec.to_finding().evidence == "Fact one.; A completely unrelated fact."
 
 
 class TestValidation:

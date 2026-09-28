@@ -55,6 +55,13 @@ limitations and recommendation text are each joined across every source, so a me
 a reason a caller reading only the flattened form would otherwise lose; severity and confidence
 are the ones already computed onto the ``Recommendation`` itself. Title and severity can come
 from different sources when they disagree -- the flattened form is a summary, not a rewrite.
+
+Joining text across two sources can produce a near-restate rather than two genuinely different
+sentences -- eda's and split_strategy's own phrasing of the same class-imbalance fact, for
+example, differ only in whether the minority label is named. ``_join`` drops one side of a pair
+only when one text, trailing periods stripped, is a literal substring of the other, keeping the
+longer (strictly more informative) one; two texts that are not in a substring relationship are
+always both kept, even when they describe the same underlying fact in unrelated words.
 """
 
 from collections.abc import Iterable
@@ -160,7 +167,23 @@ class Recommendation(JsonSerializable):
 def _join(texts: Iterable[str | None]) -> str:
     # dict.fromkeys drops an exact repeat (both sources phrasing a fact identically) while
     # keeping the order the source findings were read in.
-    return "; ".join(dict.fromkeys(text for text in texts if text))
+    exact = list(dict.fromkeys(text for text in texts if text))
+    # A near-restate isn't byte-identical, so dict.fromkeys above lets it through. When one
+    # string, trailing periods stripped, is a substring of another, it says nothing the longer
+    # one doesn't already say, so only the longer one is kept. Two texts that genuinely differ
+    # are never touched by this.
+    kept: list[str] = []
+    for text in exact:
+        if any(_contains(longer, text) for longer in kept):
+            continue
+        kept = [longer for longer in kept if not _contains(text, longer)]
+        kept.append(text)
+    return "; ".join(kept)
+
+
+def _contains(outer: str, inner: str) -> bool:
+    """Whether ``inner``, trailing periods stripped, is a substring of ``outer``, likewise."""
+    return inner.rstrip(".") in outer.rstrip(".")
 
 
 def build_recommendations(
