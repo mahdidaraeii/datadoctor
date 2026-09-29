@@ -1,12 +1,15 @@
-"""Terminal rendering of results.
+"""Terminal rendering of results, and the markdown report.
 
 Formatting only. Every number shown here was produced by the engine; nothing is computed.
 """
+
+from pathlib import Path
 
 from rich.console import Console, Group
 from rich.table import Table
 from rich.text import Text
 
+from datadoctor.core.config import AnalysisConfig
 from datadoctor.core.dataset import Dataset
 from datadoctor.core.provenance import Provenance
 from datadoctor.core.result import AnalysisResult, Finding, Severity
@@ -117,6 +120,81 @@ def render_diagnose(console: Console, dataset: Dataset, result: AnalysisResult) 
     for finding in result.findings:
         console.print()
         console.print(_finding_block(finding))
+
+
+def render_report_markdown(
+    dataset: Dataset,
+    config: AnalysisConfig,
+    findings: tuple[Finding, ...],
+    findings_by_severity: dict[str, int],
+    figures: dict[str, Path],
+) -> str:
+    """Build the combined report as a markdown document: an executive summary, every finding in
+    the same evidence/interpretation/limitations-separated block style used everywhere else in
+    this project, and a limitations section for the report as a whole.
+
+    Formatting only, like every other function here: ``findings``, ``findings_by_severity`` and
+    ``figures`` are already computed. Nothing here depends on wall-clock time, so the same
+    findings and config always produce the same text.
+    """
+    rows, columns = dataset.data.shape
+    lines = [
+        f"# Report: {dataset.name}",
+        "",
+        f"{rows} rows, {columns} columns. Settings: seed {config.random_seed}, row threshold "
+        f"{config.row_threshold}, column threshold {config.column_threshold}.",
+        "",
+        "## Executive summary",
+        "",
+    ]
+    counts = [f"{count} {severity}" for severity, count in findings_by_severity.items() if count]
+    if not findings:
+        lines += [
+            "No findings from: profile, quality, eda, diagnose.",
+            "This means these checks found nothing at their thresholds.",
+            "It does not show that the data is clean or ready to model.",
+            "",
+        ]
+    else:
+        lines += [f"{len(findings)} findings ({', '.join(counts)}).", ""]
+
+    if figures:
+        lines += ["## Figures", ""]
+        lines += [f"- **{key}**: `{path}`" for key, path in sorted(figures.items())]
+        lines.append("")
+
+    if findings:
+        lines += ["## Findings", ""]
+        for finding in findings:
+            lines += _markdown_finding_block(finding)
+            lines.append("")
+
+    lines += [
+        "## Limitations",
+        "",
+        "This report combines schema profiling, data quality checks, exploratory analysis and "
+        "ML-readiness diagnostics. It does not train or evaluate a model, and these checks do "
+        "not cover every way a dataset can fail. Each finding's own Limitations field states "
+        "what that specific check did not test; this section is about the report as a whole.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _markdown_finding_block(finding: Finding) -> list[str]:
+    lines = [
+        f"### {finding.severity.value.upper()} -- {finding.title} "
+        f"(confidence {finding.confidence})",
+        "",
+    ]
+    if finding.affected_columns:
+        lines.append(f"- **Columns**: {', '.join(finding.affected_columns)}")
+    lines.append(f"- **Evidence**: {finding.evidence}")
+    lines.append(f"- **Interpretation**: {finding.interpretation}")
+    lines.append(f"- **Limitations**: {finding.limitations}")
+    if finding.recommendation:
+        lines.append(f"- **Recommendation**: {finding.recommendation}")
+    return lines
 
 
 def _settings(result: AnalysisResult) -> str:

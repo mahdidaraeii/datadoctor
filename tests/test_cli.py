@@ -695,3 +695,60 @@ class TestDiagnoseFailures:
         assert "error: " in result.output
         assert "no data rows" in result.output
         assert "Traceback" not in result.output
+
+
+def report_csv(tmp_path):
+    """Same shape as tests/test_report.py's mixed_frame: a quality-only missingness finding, an
+    eda-only correlation finding, and a target imbalanced enough for eda's and split_strategy's
+    own findings to merge into one recommendation."""
+    lines = ["correlated_a,correlated_b,income,target"]
+    for k in range(200):
+        a = k % 50
+        b = a * 2 + 1
+        income = "" if k < 80 else 30000.0 + k
+        target = "rare" if k < 6 else "common"
+        lines.append(f"{a},{b},{income},{target}")
+    path = tmp_path / "report.csv"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+    return path
+
+
+class TestReportOutput:
+    def test_exit_0_and_prints_the_written_path(self, tmp_path):
+        result = run("report", report_csv(tmp_path), "--target", "target")
+
+        assert result.exit_code == 0
+        assert "Wrote report to" in result.output
+
+    def test_the_written_file_contains_findings_from_all_four_sources(self, tmp_path):
+        result = run("report", report_csv(tmp_path), "--target", "target")
+
+        written_path = Path(result.output.removeprefix("Wrote report to ").strip())
+        text = written_path.read_text(encoding="utf-8")
+
+        assert "High missingness in income" in text  # quality-only
+        assert "Numeric columns are strongly correlated" in text  # eda-only
+        assert text.count("The target classes are imbalanced") == 1  # merged, exactly once
+        assert "## Limitations" in text
+
+
+class TestReportFailures:
+    def test_a_load_error_is_one_line_and_exit_one(self, tmp_path):
+        result = run("report", tmp_path / "nope.csv")
+
+        assert result.exit_code == 1
+        assert "error: file not found" in result.output
+        assert "Traceback" not in result.output
+
+    def test_a_dataset_with_no_rows_is_a_clean_error(self, tmp_path):
+        # The loader itself refuses an empty file, so build_report's own guard is never reached
+        # here; that guard is exercised directly in tests/test_report.py.
+        path = tmp_path / "empty.csv"
+        path.write_text("a,b\n", encoding="utf-8", newline="")
+
+        result = run("report", path)
+
+        assert result.exit_code == 1
+        assert "error: " in result.output
+        assert "no data rows" in result.output
+        assert "Traceback" not in result.output

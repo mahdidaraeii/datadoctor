@@ -17,6 +17,7 @@ from datadoctor.eda import run_eda
 from datadoctor.profiling.schema import profile_schema
 from datadoctor.quality import run_quality_checks
 from datadoctor.render import render_diagnose, render_explore, render_profile, render_quality
+from datadoctor.report import build_report
 
 app = typer.Typer(
     help="A diagnostic workbench for tabular datasets.",
@@ -241,6 +242,40 @@ def diagnose(
         return
     _write_json(json_path, dataset, "diagnose", result)
     typer.echo(f"Wrote diagnose report to {json_path}")
+
+
+@app.command()
+def report(
+    path: Annotated[Path, typer.Argument(metavar="PATH", help="The data file to report on.")],
+    target: Target = None,
+    file_format: FileFormat = None,
+    separator: Separator = None,
+    encoding: Encoding = None,
+    sheet: Sheet = None,
+    text_column: TextColumn = None,
+) -> None:
+    """Combine profile, quality, explore and diagnose into one markdown document.
+
+    Unlike `diagnose`, this includes the full quality and eda finding sets, not just split
+    strategy, leakage and readiness.
+    """
+    config = AnalysisConfig()
+    try:
+        dataset = load_dataset(
+            path,
+            file_format=file_format,
+            target=target,
+            separator=separator,
+            encoding=encoding,
+            sheet=sheet,
+            text_columns=text_column,
+            config=config,
+        )
+        result = build_report(dataset, config)
+    except DataDoctorError as exc:
+        _fail(str(exc))
+
+    typer.echo(f"Wrote report to {result.artifacts['report']}")
 
 
 def _write_json(path: Path, dataset: Dataset, key: str, result: AnalysisResult) -> None:
