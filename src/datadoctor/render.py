@@ -1,8 +1,9 @@
-"""Terminal rendering of results, and the markdown report.
+"""Terminal rendering of results, and the markdown and HTML reports.
 
 Formatting only. Every number shown here was produced by the engine; nothing is computed.
 """
 
+import html as html_lib
 from pathlib import Path
 
 from rich.console import Console, Group
@@ -22,6 +23,32 @@ _SEVERITY_STYLE = {
     Severity.LOW: "bold cyan",
     Severity.INFO: "bold blue",
 }
+# Same hue family as _SEVERITY_STYLE above, translated to CSS for the HTML report.
+_REPORT_CSS = """
+body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem;
+       line-height: 1.5; color: #1a1a1a; }
+h1, h2 { border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.25rem;
+         font-weight: bold; font-size: 0.8rem; color: white; }
+.badge-critical { background: #7a0010; }
+.badge-high { background: #c62828; }
+.badge-medium { background: #b8860b; }
+.badge-low { background: #00838f; }
+.badge-info { background: #1565c0; }
+.finding { border-left: 4px solid #ccc; padding: 0.25rem 1rem; margin: 1rem 0; }
+.finding.severity-critical { border-left-color: #7a0010; }
+.finding.severity-high { border-left-color: #c62828; }
+.finding.severity-medium { border-left-color: #b8860b; }
+.finding.severity-low { border-left-color: #00838f; }
+.finding.severity-info { border-left-color: #1565c0; }
+.confidence { color: #666; font-weight: normal; font-size: 0.85rem; }
+dl { margin: 0.5rem 0; }
+dt { font-weight: bold; margin-top: 0.4rem; }
+dd { margin-left: 0; }
+figure { margin: 1rem 0; }
+figcaption { color: #666; font-size: 0.85rem; }
+img { max-width: 100%; }
+""".strip()
 
 
 def render_profile(console: Console, dataset: Dataset, result: AnalysisResult) -> None:
@@ -195,6 +222,109 @@ def _markdown_finding_block(finding: Finding) -> list[str]:
     if finding.recommendation:
         lines.append(f"- **Recommendation**: {finding.recommendation}")
     return lines
+
+
+def render_report_html(result: AnalysisResult, dataset_name: str | None = None) -> str:
+    """Build the combined report as a self-contained HTML document.
+
+    Same content and section order as ``render_report_markdown`` -- executive summary, figures,
+    findings, limitations -- styled inline (a ``<style>`` block in ``<head>``, no separate CSS
+    file), with each finding's severity shown as a colored badge and a matching left border.
+
+    Formatting only, like every other function here: takes the already-built ``result`` and
+    nothing else is computed. ``dataset_name`` is the one thing ``AnalysisResult`` carries no
+    field for; it falls back to a generic title when not given.
+
+    Figures are referenced by their bare filename (``<img src="name.png">``), not embedded and
+    not given a full path: this document is always written next to the same PNGs ``eda`` wrote,
+    so the bare filename is already the correct relative reference. Every piece of text that
+    came from the data -- titles, column names, evidence and the rest, and each figure's alt
+    text -- is HTML-escaped before insertion, so a value containing ``<``, ``>`` or ``&`` cannot
+    break the markup or be misrendered.
+    """
+    escape = html_lib.escape
+    title = escape(dataset_name) if dataset_name else "Diagnostic Report"
+    profile_metrics = result.metrics.get("profile", {})
+    rows = profile_metrics.get("n_rows")
+    columns = profile_metrics.get("n_columns")
+    config = result.config
+
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="utf-8">',
+        f"<title>{title}</title>",
+        f"<style>{_REPORT_CSS}</style>",
+        "</head>",
+        "<body>",
+        f"<h1>{title}</h1>",
+    ]
+    if rows is not None and columns is not None:
+        parts.append(f"<p>{rows} rows, {columns} columns.</p>")
+    if config is not None:
+        parts.append(
+            f"<p>Settings: seed {config.random_seed}, row threshold {config.row_threshold}, "
+            f"column threshold {config.column_threshold}.</p>"
+        )
+
+    parts.append("<h2>Executive summary</h2>")
+    by_severity = result.metrics.get("findings_by_severity", {})
+    counts = [f"{count} {severity}" for severity, count in by_severity.items() if count]
+    if not result.findings:
+        parts += [
+            "<p>No findings from: profile, quality, eda, diagnose.</p>",
+            "<p>This means these checks found nothing at their thresholds.</p>",
+            "<p>It does not show that the data is clean or ready to model.</p>",
+        ]
+    else:
+        parts.append(f"<p>{len(result.findings)} findings ({escape(', '.join(counts))}).</p>")
+
+    figures = {key: path for key, path in result.artifacts.items() if key != "report"}
+    if figures:
+        parts.append("<h2>Figures</h2>")
+        for key, path in sorted(figures.items()):
+            alt = escape(key)
+            parts.append(
+                f'<figure><img src="{escape(path.name)}" alt="{alt}">'
+                f"<figcaption>{alt}</figcaption></figure>"
+            )
+
+    if result.findings:
+        parts.append("<h2>Findings</h2>")
+        parts += [_html_finding_block(finding) for finding in result.findings]
+
+    parts += [
+        "<h2>Limitations</h2>",
+        "<p>This report combines schema profiling, data quality checks, exploratory analysis "
+        "and ML-readiness diagnostics. It does not train or evaluate a model, and these checks "
+        "do not cover every way a dataset can fail. Each finding's own Limitations field states "
+        "what that specific check did not test; this section is about the report as a whole.</p>",
+        "</body>",
+        "</html>",
+    ]
+    return "\n".join(parts)
+
+
+def _html_finding_block(finding: Finding) -> str:
+    escape = html_lib.escape
+    severity = finding.severity.value
+    lines = [
+        f'<div class="finding severity-{severity}">',
+        f'<h3><span class="badge badge-{severity}">{severity.upper()}</span> '
+        f"{escape(finding.title)} "
+        f'<span class="confidence">confidence {finding.confidence}</span></h3>',
+        "<dl>",
+    ]
+    if finding.affected_columns:
+        lines.append(f"<dt>Columns</dt><dd>{escape(', '.join(finding.affected_columns))}</dd>")
+    lines.append(f"<dt>Evidence</dt><dd>{escape(finding.evidence)}</dd>")
+    lines.append(f"<dt>Interpretation</dt><dd>{escape(finding.interpretation)}</dd>")
+    lines.append(f"<dt>Limitations</dt><dd>{escape(finding.limitations)}</dd>")
+    if finding.recommendation:
+        lines.append(f"<dt>Recommendation</dt><dd>{escape(finding.recommendation)}</dd>")
+    lines += ["</dl>", "</div>"]
+    return "\n".join(lines)
 
 
 def _settings(result: AnalysisResult) -> str:

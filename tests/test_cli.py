@@ -713,23 +713,62 @@ def report_csv(tmp_path):
     return path
 
 
+def _report_paths(output):
+    both = output.removeprefix("Wrote report to ").strip()
+    md_text, html_text = both.split(" and ")
+    return Path(md_text), Path(html_text)
+
+
 class TestReportOutput:
-    def test_exit_0_and_prints_the_written_path(self, tmp_path):
+    def test_exit_0_and_prints_both_written_paths(self, tmp_path):
         result = run("report", report_csv(tmp_path), "--target", "target")
 
         assert result.exit_code == 0
         assert "Wrote report to" in result.output
+        md_path, html_path = _report_paths(result.output)
+        assert md_path.name == "report.md"
+        assert html_path.name == "report.html"
 
-    def test_the_written_file_contains_findings_from_all_four_sources(self, tmp_path):
+    def test_the_markdown_file_contains_findings_from_all_four_sources(self, tmp_path):
         result = run("report", report_csv(tmp_path), "--target", "target")
 
-        written_path = Path(result.output.removeprefix("Wrote report to ").strip())
-        text = written_path.read_text(encoding="utf-8")
+        md_path, _ = _report_paths(result.output)
+        text = md_path.read_text(encoding="utf-8")
 
         assert "High missingness in income" in text  # quality-only
         assert "Numeric columns are strongly correlated" in text  # eda-only
         assert text.count("The target classes are imbalanced") == 1  # merged, exactly once
         assert "## Limitations" in text
+
+    def test_the_html_file_contains_findings_from_all_four_sources(self, tmp_path):
+        result = run("report", report_csv(tmp_path), "--target", "target")
+
+        _, html_path = _report_paths(result.output)
+        text = html_path.read_text(encoding="utf-8")
+
+        assert "High missingness in income" in text  # quality-only
+        assert "Numeric columns are strongly correlated" in text  # eda-only
+        assert text.count("The target classes are imbalanced") == 1  # merged, exactly once
+        assert "<h2>Limitations</h2>" in text
+        assert "<!DOCTYPE html>" in text
+
+    def test_the_html_document_uses_the_dataset_name_as_its_title(self, tmp_path):
+        result = run("report", report_csv(tmp_path), "--target", "target")
+
+        _, html_path = _report_paths(result.output)
+        text = html_path.read_text(encoding="utf-8")
+
+        assert "<h1>report</h1>" in text  # report_csv writes to "report.csv"
+
+    def test_both_files_are_written_in_one_run_and_neither_is_stale(self, tmp_path):
+        result = run("report", report_csv(tmp_path), "--target", "target")
+
+        md_path, html_path = _report_paths(result.output)
+        assert md_path.exists()
+        assert html_path.exists()
+        # Different formats of the same content, not one derived by re-reading the other.
+        assert "## Limitations" not in html_path.read_text(encoding="utf-8")
+        assert "<h2>Limitations</h2>" not in md_path.read_text(encoding="utf-8")
 
 
 class TestReportFailures:

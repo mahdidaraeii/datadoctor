@@ -16,7 +16,13 @@ from datadoctor.diagnostics import run_diagnostics
 from datadoctor.eda import run_eda
 from datadoctor.profiling.schema import profile_schema
 from datadoctor.quality import run_quality_checks
-from datadoctor.render import render_diagnose, render_explore, render_profile, render_quality
+from datadoctor.render import (
+    render_diagnose,
+    render_explore,
+    render_profile,
+    render_quality,
+    render_report_html,
+)
 from datadoctor.report import build_report
 
 app = typer.Typer(
@@ -254,7 +260,7 @@ def report(
     sheet: Sheet = None,
     text_column: TextColumn = None,
 ) -> None:
-    """Combine profile, quality, explore and diagnose into one markdown document.
+    """Combine profile, quality, explore and diagnose into one markdown and one HTML document.
 
     Unlike `diagnose`, this includes the full quality and eda finding sets, not just split
     strategy, leakage and readiness.
@@ -275,7 +281,9 @@ def report(
     except DataDoctorError as exc:
         _fail(str(exc))
 
-    typer.echo(f"Wrote report to {result.artifacts['report']}")
+    html_path = config.output_dir / "report.html"
+    html_path.write_text(render_report_html(result, dataset.name), encoding="utf-8")
+    typer.echo(f"Wrote report to {result.artifacts['report']} and {html_path}")
 
 
 def _write_json(path: Path, dataset: Dataset, key: str, result: AnalysisResult) -> None:
