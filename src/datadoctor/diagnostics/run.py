@@ -11,6 +11,14 @@ correctness bug the day the registry grows to include a quality category -- noth
 suite would catch it, since the whole premise for skipping would be that quality's output is
 always discarded.
 
+``quality`` and ``eda`` are also accepted as optional parameters, the same calling convention
+``check_readiness`` already uses for ``splits``/``leakage``: reused when given, computed when
+not. ``report`` (S31) needs its own full ``quality`` and ``eda`` results for its own sections and
+would otherwise pay for both a second time here -- run_quality_checks alone costs on the order of
+13 seconds at 1,000,000 rows, run_eda a further 9 to 12, so recomputing both inside a nested
+``run_diagnostics`` call roughly doubles a report's cost for no new information, and writes
+eda's plot files a second time to boot.
+
 ``findings`` and ``metrics["recommendations"]`` are scoped to this package's own domain: split
 strategy, leakage and readiness. A ``Recommendation`` is kept only when at least one of its
 source findings belongs to one of those three categories. A merged entry (the two groups
@@ -38,7 +46,13 @@ from datadoctor.quality.run import run_quality_checks
 _KEPT_CATEGORIES = {"split_strategy", "leakage", "readiness"}
 
 
-def run_diagnostics(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
+def run_diagnostics(
+    dataset: Dataset,
+    config: AnalysisConfig,
+    *,
+    quality: AnalysisResult | None = None,
+    eda: AnalysisResult | None = None,
+) -> AnalysisResult:
     """Run quality, eda, split strategy, leakage and readiness, and rank the result.
 
     See the module docstring for what is run, what is reused, and which recommendations make it
@@ -46,7 +60,12 @@ def run_diagnostics(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
 
     Args:
         dataset: The dataset to diagnose. It must have at least one row.
-        config: The settings to run under. Recorded in the result.
+        config: The settings to run under. Only used when ``quality`` or ``eda`` must be
+            computed here; recorded in the result regardless.
+        quality: The result of ``run_quality_checks(dataset, config)``, if already computed.
+            Computed here when ``None``.
+        eda: The result of ``run_eda(dataset, config)``, if already computed. Computed here
+            when ``None`` -- and only then are eda's plot files written by this call.
 
     Returns:
         ``findings`` holds the kept recommendations, flattened to one ``Finding`` each, most
@@ -58,8 +77,10 @@ def run_diagnostics(dataset: Dataset, config: AnalysisConfig) -> AnalysisResult:
     if len(dataset.data) == 0:
         raise DatasetError("cannot run diagnostics on a dataset with no rows")
 
-    quality = run_quality_checks(dataset, config)
-    eda = run_eda(dataset, config)
+    if quality is None:
+        quality = run_quality_checks(dataset, config)
+    if eda is None:
+        eda = run_eda(dataset, config)
     splits = check_split_strategy(dataset, config)
     leakage = check_leakage(dataset, config)
     readiness = check_readiness(dataset, config, splits=splits, leakage=leakage)

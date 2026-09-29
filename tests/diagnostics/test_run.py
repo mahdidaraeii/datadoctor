@@ -10,6 +10,8 @@ from datadoctor.diagnostics.leakage import check_leakage
 from datadoctor.diagnostics.readiness import check_readiness
 from datadoctor.diagnostics.run import run_diagnostics
 from datadoctor.diagnostics.splits import check_split_strategy
+from datadoctor.eda import run_eda
+from datadoctor.quality import run_quality_checks
 from datadoctor.testing.synthetic import SyntheticConfig, make_synthetic_dataset
 
 CONFIG = AnalysisConfig()
@@ -91,6 +93,32 @@ class TestReadinessReuse:
         result = run_diagnostics(dataset, CONFIG)
 
         assert result.metrics["readiness"] == standalone.metrics
+
+
+class TestQualityEdaReuse:
+    def test_a_passed_in_empty_eda_result_is_used_as_is_not_recomputed(self):
+        # mixed_frame's target is imbalanced enough that a freshly computed eda result would
+        # merge with split_strategy's own stratification finding. Passing an empty eda result
+        # in means that merge cannot happen -- proving it was reused, not recomputed, since a
+        # fresh computation would have found the real imbalance.
+        dataset = Dataset(data=mixed_frame(), name="t", target="target")
+        empty_eda = AnalysisResult(findings=())
+
+        result = run_diagnostics(dataset, CONFIG, eda=empty_eda)
+
+        titles = [f.title for f in result.findings]
+        assert "The target classes are imbalanced" not in titles
+        assert "Stratified splitting is recommended for this target" in titles
+
+    def test_a_passed_in_quality_result_produces_the_same_result_as_computing_it_fresh(self):
+        dataset = Dataset(data=mixed_frame(), name="t", target="target")
+        quality = run_quality_checks(dataset, CONFIG)
+        eda = run_eda(dataset, CONFIG)
+
+        reused = run_diagnostics(dataset, CONFIG, quality=quality, eda=eda)
+        fresh = run_diagnostics(dataset, CONFIG)
+
+        assert reused.to_json() == fresh.to_json()
 
 
 class TestMetrics:

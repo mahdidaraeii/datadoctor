@@ -81,9 +81,26 @@ from datadoctor.eda.relationships_findings import TARGET_UNUSABLE_TITLE as EDA_U
 
 # Each group is a set of (category, title) pairs verified, by reading the analyzers' own code, to
 # represent the same fact. See the module docstring for why each group is here.
+#
+# Each group's own recommendation -- category "recommendation", the title Recommendation.to_finding
+# gives it -- is registered alongside its raw sources, not in a separate group: to_finding's title
+# always comes from findings[0], which for both groups below is the eda finding, so the
+# recommendation's title is always that same eda title. Keeping it in the same group (rather than
+# a new one) is required, not stylistic: _group_index returns the first group a key is found in,
+# so if ("eda", IMBALANCE_TITLE) were also registered in a second, separate group, _group_index
+# would never return that second group for it, and drop_findings_superseded_by_recommendations
+# below would never see the two as sharing a group. See that function for what this is for.
 _ROOT_CAUSE_GROUPS: tuple[frozenset[tuple[str, str]], ...] = (
-    frozenset({("eda", EDA_UNUSABLE), ("readiness", READINESS_UNUSABLE)}),
-    frozenset({("eda", IMBALANCE_TITLE), ("split_strategy", STRATIFIED_TITLE)}),
+    frozenset(
+        {("eda", EDA_UNUSABLE), ("readiness", READINESS_UNUSABLE), ("recommendation", EDA_UNUSABLE)}
+    ),
+    frozenset(
+        {
+            ("eda", IMBALANCE_TITLE),
+            ("split_strategy", STRATIFIED_TITLE),
+            ("recommendation", IMBALANCE_TITLE),
+        }
+    ),
 )
 
 
@@ -244,4 +261,37 @@ def _merge(findings: tuple[Finding, ...]) -> Recommendation:
     columns = tuple(dict.fromkeys(c for finding in findings for c in finding.affected_columns))
     return Recommendation(
         severity=winner.severity, confidence=winner.confidence, columns=columns, findings=findings
+    )
+
+
+def drop_findings_superseded_by_recommendations(findings: Iterable[Finding]) -> tuple[Finding, ...]:
+    """Drop a raw finding when a recommendation covering the same root cause is also present.
+
+    A ``category="recommendation"`` finding (``Recommendation.to_finding()``) for one of the
+    registered groups already carries everything its raw eda source finding does -- evidence,
+    interpretation, limitations and recommendation text joined across every finding that
+    contributed to it, see the module docstring -- and more. A caller that combines findings
+    from several already-merged results, such as ``report`` combining ``quality``, ``eda`` and
+    ``diagnose`` together, would otherwise show the same fact twice: once as eda's own raw
+    finding, once again inside diagnose's fuller, already-joined recommendation.
+
+    Only a finding whose ``(category, title)`` is in the same registered group as a present
+    recommendation, and whose ``affected_columns`` match exactly, is dropped. A recommendation
+    itself is never dropped, and anything not in a registered group -- everything from quality,
+    most of eda, and any singleton recommendation -- is never touched.
+
+    ``findings`` is assumed already free of exact byte-identical repeats (``dict.fromkeys``);
+    this runs after that step, not instead of it.
+    """
+    findings = tuple(findings)
+    covered = {
+        (_group_index(finding), frozenset(finding.affected_columns))
+        for finding in findings
+        if finding.category == "recommendation" and _group_index(finding) is not None
+    }
+    return tuple(
+        finding
+        for finding in findings
+        if finding.category == "recommendation"
+        or (_group_index(finding), frozenset(finding.affected_columns)) not in covered
     )

@@ -1,7 +1,11 @@
 import pytest
 
 from datadoctor.core.result import AnalysisResult, Finding, Severity
-from datadoctor.diagnostics.recommendations import Recommendation, build_recommendations
+from datadoctor.diagnostics.recommendations import (
+    Recommendation,
+    build_recommendations,
+    drop_findings_superseded_by_recommendations,
+)
 from datadoctor.diagnostics.splits_findings import stratified_split_finding
 from datadoctor.eda.relationships_findings import class_imbalance_finding
 
@@ -378,6 +382,76 @@ class TestJoinSubstringRule:
         (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
 
         assert rec.to_finding().evidence == "Fact one.; A completely unrelated fact."
+
+
+class TestDropSupersededByRecommendations:
+    def test_the_wine_imbalance_finding_appears_exactly_once_as_the_recommendation_version(self):
+        eda_finding = class_imbalance_finding("quality", 9, 0.0010208248264597796, Severity.MEDIUM)
+        splits_finding = stratified_split_finding("quality", 0.0010208248264597796, Severity.MEDIUM)
+        (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
+        flattened = rec.to_finding()
+
+        # report's own combine step: profile/quality/eda's raw findings alongside diagnose's
+        # already-merged recommendation views, in that order.
+        kept = drop_findings_superseded_by_recommendations([eda_finding, flattened])
+
+        assert kept == (flattened,)
+        assert kept[0].category == "recommendation"
+
+    def test_the_target_unusable_finding_also_collapses_to_its_recommendation_version(self):
+        eda_finding = f("eda", EDA_UNUSABLE_TITLE, Severity.INFO, columns=("target",))
+        readiness_finding = f(
+            "readiness", READINESS_UNUSABLE_TITLE, Severity.CRITICAL, columns=("target",)
+        )
+        (rec,) = build(eda=(eda_finding,), readiness=(readiness_finding,))
+        flattened = rec.to_finding()
+
+        kept = drop_findings_superseded_by_recommendations([eda_finding, flattened])
+
+        assert kept == (flattened,)
+
+    def test_the_recommendation_itself_is_never_dropped_when_it_appears_alone(self):
+        eda_finding = f("eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",))
+        splits_finding = f("split_strategy", STRATIFIED_TITLE, Severity.MEDIUM, columns=("y",))
+        (rec,) = build(eda=(eda_finding,), splits=(splits_finding,))
+        flattened = rec.to_finding()
+
+        kept = drop_findings_superseded_by_recommendations([flattened])
+
+        assert kept == (flattened,)
+
+    def test_the_raw_finding_alone_is_untouched_when_no_recommendation_is_present(self):
+        eda_finding = f("eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("y",))
+
+        kept = drop_findings_superseded_by_recommendations([eda_finding])
+
+        assert kept == (eda_finding,)
+
+    def test_a_column_mismatch_keeps_both(self):
+        eda_finding = f("eda", EDA_IMBALANCE_TITLE, Severity.LOW, columns=("a",))
+        # A recommendation-category finding for the same title but a different column: not the
+        # same instance of the fact, so the raw finding must not be dropped.
+        unrelated_recommendation = f(
+            "recommendation", EDA_IMBALANCE_TITLE, Severity.MEDIUM, columns=("b",)
+        )
+
+        kept = drop_findings_superseded_by_recommendations([eda_finding, unrelated_recommendation])
+
+        assert set(kept) == {eda_finding, unrelated_recommendation}
+
+    def test_findings_outside_any_registered_group_are_never_touched(self):
+        quality_finding = f(
+            "outliers", "Outlier candidates in numeric columns", Severity.LOW, columns=("x",)
+        )
+        singleton_recommendation = f(
+            "recommendation", "Outlier candidates in numeric columns", Severity.LOW, columns=("x",)
+        )
+
+        kept = drop_findings_superseded_by_recommendations(
+            [quality_finding, singleton_recommendation]
+        )
+
+        assert set(kept) == {quality_finding, singleton_recommendation}
 
 
 class TestValidation:
