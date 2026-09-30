@@ -11,6 +11,7 @@ is uncertain, and leaves the decision to you.
 ## Install
 
 ```
+uv venv
 uv pip install -e .
 ```
 
