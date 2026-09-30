@@ -23,9 +23,10 @@ adds both plus the test and lint tooling.
 uv run -m datadoctor <command> <path> [options]
 ```
 
-Three commands: `profile`, `quality` and `explore`. Every one accepts `--target <column>` (the
-column to be predicted, if there is one), `--format`, `--separator`, `--encoding`, `--sheet` and
-`--text-column` to control how the file is read, and `--help` for the full list.
+Five commands: `profile`, `quality`, `explore`, `diagnose` and `report`. Every one accepts
+`--target <column>` (the column to be predicted, if there is one), `--format`, `--separator`,
+`--encoding`, `--sheet` and `--text-column` to control how the file is read, and `--help` for the
+full list.
 
 The examples below run against `data/sample/breast_cancer.csv`, one of two small, real, clearly
 licensed datasets bundled for exactly this purpose — see [`data/sample/README.md`](data/sample/README.md)
@@ -139,7 +140,58 @@ Close enough to even that no imbalance finding fires.
 
 The other four files (the per-column histograms and bar charts) are in the same directory.
 
-## Development
+### `diagnose`
 
-See [`CLAUDE.md`](CLAUDE.md) and [`BUILD_STEPS.md`](BUILD_STEPS.md) for how this project is
-built and the rules that apply to every step.
+Split strategy, leakage and ML-readiness findings, ranked into recommendations. Deliberately
+excludes the full quality and eda finding sets — see `quality` and `explore` for those.
+
+```
+uv run -m datadoctor diagnose data/sample/breast_cancer.csv --target diagnosis
+```
+
+```
+Diagnose: breast_cancer (569 rows, 31 columns)
+Settings: seed 42, row threshold 100000, column threshold 100
+Covers: split strategy, leakage and readiness only. Quality and eda findings are not repeated here
+-- run `quality` and `explore` for those.
+
+No findings from: split strategy, leakage, readiness.
+This means these checks found nothing at their thresholds.
+It does not show that the data is clean or ready to model.
+```
+
+`breast_cancer.csv` is a single, clean, non-temporal dataset with a balanced-enough target, so
+none of split strategy, leakage or readiness has anything to flag here — an honest empty result,
+not a suppressed one. Run it against `data/sample/wine_quality.csv --target quality` instead to
+see one fire: that target's smallest class holds under 1% of the rows, which `explore`'s own
+class-imbalance check and this command's split-strategy check catch on the same root cause and
+merge into a single recommendation.
+
+### `report`
+
+Combines `profile`, `quality`, `explore` and `diagnose` into one document — the full quality and
+eda finding sets, not `diagnose`'s scoped view, ranked together with everything else. Writes both
+`report.md` and `report.html` in the same run.
+
+```
+uv run -m datadoctor report data/sample/breast_cancer.csv --target diagnosis
+```
+
+```
+Wrote report to outputs\report.md and outputs\report.html
+```
+
+The first lines of `report.md`:
+
+```
+# Report: breast_cancer
+
+569 rows, 31 columns. Settings: seed 42, row threshold 100000, column threshold 100.
+
+## Executive summary
+
+4 findings (1 medium, 2 low, 1 info).
+```
+
+`report.html` carries the same content, styled inline (a colored severity badge and border per
+finding) with no separate CSS file, meant to be opened directly in a browser.
