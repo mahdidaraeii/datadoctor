@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>breast_cancer</title>
+<style>body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem;
+       line-height: 1.5; color: #1a1a1a; }
+h1, h2 { border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.25rem;
+         font-weight: bold; font-size: 0.8rem; color: white; }
+.badge-critical { background: #7a0010; }
+.badge-high { background: #c62828; }
+.badge-medium { background: #b8860b; }
+.badge-low { background: #00838f; }
+.badge-info { background: #1565c0; }
+.finding { border-left: 4px solid #ccc; padding: 0.25rem 1rem; margin: 1rem 0; }
+.finding.severity-critical { border-left-color: #7a0010; }
+.finding.severity-high { border-left-color: #c62828; }
+.finding.severity-medium { border-left-color: #b8860b; }
+.finding.severity-low { border-left-color: #00838f; }
+.finding.severity-info { border-left-color: #1565c0; }
+.confidence { color: #666; font-weight: normal; font-size: 0.85rem; }
+dl { margin: 0.5rem 0; }
+dt { font-weight: bold; margin-top: 0.4rem; }
+dd { margin-left: 0; }
+figure { margin: 1rem 0; }
+figcaption { color: #666; font-size: 0.85rem; }
+img { max-width: 100%; }</style>
+</head>
+<body>
+<h1>breast_cancer</h1>
+<p>569 rows, 31 columns.</p>
+<p>Settings: seed 42, row threshold 100000, column threshold 100.</p>
+<h2>Executive summary</h2>
+<p>4 findings (1 medium, 2 low, 1 info).</p>
+<h2>Figures</h2>
+<figure><img src="correlation_heatmap.png" alt="correlation_heatmap"><figcaption>correlation_heatmap</figcaption></figure>
+<figure><img src="target_distribution.png" alt="target_distribution"><figcaption>target_distribution</figcaption></figure>
+<figure><img src="univariate_categorical_1.png" alt="univariate_categorical_1"><figcaption>univariate_categorical_1</figcaption></figure>
+<figure><img src="univariate_numeric_1.png" alt="univariate_numeric_1"><figcaption>univariate_numeric_1</figcaption></figure>
+<figure><img src="univariate_numeric_2.png" alt="univariate_numeric_2"><figcaption>univariate_numeric_2</figcaption></figure>
+<figure><img src="univariate_numeric_3.png" alt="univariate_numeric_3"><figcaption>univariate_numeric_3</figcaption></figure>
+<h2>Findings</h2>
+<div class="finding severity-medium">
+<h3><span class="badge badge-medium">MEDIUM</span> Extreme values in numeric columns <span class="confidence">confidence 0.7</span></h3>
+<dl>
+<dt>Columns</dt><dd>mean radius, mean texture, mean area, mean smoothness, mean compactness, mean symmetry, mean fractal dimension, radius error, texture error, perimeter error, area error, smoothness error, compactness error, concavity error, concave points error, symmetry error, fractal dimension error, worst perimeter, worst area, worst compactness, worst concavity, worst symmetry, worst fractal dimension</dd>
+<dt>Evidence</dt><dd>23 columns have values more than 3 interquartile ranges beyond the quartiles and more than 3 standard deviations from the mean: fractal dimension error (10 values; quartiles 0.002248 and 0.004558, wide fences -0.004682 to 0.011488); symmetry error (9 values; quartiles 0.01516 and 0.02348, wide fences -0.0098 to 0.04844); perimeter error (8 values; quartiles 1.606 and 3.357, wide fences -3.647 to 8.61); radius error (7 values; quartiles 0.2324 and 0.4789, wide fences -0.5071 to 1.2184); smoothness error (7 values; quartiles 0.005169 and 0.008146, wide fences -0.003762 to 0.017077) and 18 more.</dd>
+<dt>Interpretation</dt><dd>Values this far from the rest are candidates for data errors, such as a wrong unit, a typo or a faulty sensor, or for real but rare events. They are candidates, not errors: one column alone cannot tell which.</dd>
+<dt>Limitations</dt><dd>The fences assume little about the shape of the data. The z-score assumes it is roughly bell-shaped and is pulled by the outliers it looks for. In skewed data both flag the long tail of a legitimate distribution. The cutoffs (1.5 and 3 interquartile ranges, |z| of 3) are conventions. Each column is examined alone, so a value that is unusual only in combination with others is not found. Values are not shown here; the lowest and highest are in the metrics.</dd>
+<dt>Recommendation</dt><dd>Look at the rows behind these values and decide whether each is an error or a real case. Do not remove them automatically.</dd>
+</dl>
+</div>
+<div class="finding severity-low">
+<h3><span class="badge badge-low">LOW</span> Outlier candidates in numeric columns <span class="confidence">confidence 0.4</span></h3>
+<dl>
+<dt>Columns</dt><dd>mean perimeter, mean concavity, mean concave points, worst radius, worst texture, worst smoothness</dd>
+<dt>Evidence</dt><dd>6 columns have values outside 1.5 interquartile ranges from the quartiles or more than 3 standard deviations from the mean: mean concavity (18 values, 3.2%: 18 by the IQR rule, 9 by z-score, 9 by both; quartiles 0.02956 and 0.1307, fences -0.12215 to 0.28241); worst radius (17 values, 3.0%: 17 by the IQR rule, 6 by z-score, 6 by both; quartiles 13.01 and 18.79, fences 4.34 to 27.46); mean perimeter (13 values, 2.3%: 13 by the IQR rule, 7 by z-score, 7 by both; quartiles 75.17 and 104.1, fences 31.775 to 147.49); mean concave points (10 values, 1.8%: 10 by the IQR rule, 6 by z-score, 6 by both; quartiles 0.02031 and 0.074, fences -0.060225 to 0.15453); worst smoothness (7 values, 1.2%: 7 by the IQR rule, 3 by z-score, 3 by both; quartiles 0.1166 and 0.146, fences 0.0725 to 0.1901) and 1 more.</dd>
+<dt>Interpretation</dt><dd>These values are unusual for their column, but mild candidates are common in real data. When many values are flagged, the column is usually skewed or heavy-tailed, which is a property of the distribution and not a fault. They are candidates, not errors.</dd>
+<dt>Limitations</dt><dd>The fences assume little about the shape of the data. The z-score assumes it is roughly bell-shaped and is pulled by the outliers it looks for. In skewed data both flag the long tail of a legitimate distribution. The cutoffs (1.5 and 3 interquartile ranges, |z| of 3) are conventions. Each column is examined alone, so a value that is unusual only in combination with others is not found. Values are not shown here; the lowest and highest are in the metrics.</dd>
+<dt>Recommendation</dt><dd>Check the columns with the highest rates first. Consider a transformation, such as a logarithm, for skewed columns before treating the tail as errors.</dd>
+</dl>
+</div>
+<div class="finding severity-low">
+<h3><span class="badge badge-low">LOW</span> Numeric columns are strongly correlated <span class="confidence">confidence 1.0</span></h3>
+<dl>
+<dt>Columns</dt><dd>area error, compactness error, concavity error, fractal dimension error, mean area, mean compactness, mean concave points, mean concavity, mean perimeter, mean radius, mean smoothness, mean texture, perimeter error, radius error, worst area, worst compactness, worst concave points, worst concavity, worst fractal dimension, worst perimeter, worst radius, worst smoothness, worst texture</dd>
+<dt>Evidence</dt><dd>44 pairs of columns have an absolute Pearson correlation of at least 0.8: mean radius / mean perimeter (r=1.00); worst radius / worst perimeter (r=0.99); mean radius / mean area (r=0.99); mean perimeter / mean area (r=0.99); worst radius / worst area (r=0.98) and 39 more.</dd>
+<dt>Interpretation</dt><dd>Two strongly correlated columns carry much of the same information. Keeping both in a model rarely helps and can make coefficients unstable or hard to interpret.</dd>
+<dt>Limitations</dt><dd>The 0.8 cutoff is a convention. Pearson correlation only measures a straight-line relationship, so a strong non-linear relationship can be missed.</dd>
+<dt>Recommendation</dt><dd>Consider dropping or combining one column from each pair, or using a model that handles correlated features well.</dd>
+</dl>
+</div>
+<div class="finding severity-info">
+<h3><span class="badge badge-info">INFO</span> Columns most associated with the target <span class="confidence">confidence 1.0</span></h3>
+<dl>
+<dt>Columns</dt><dd>worst concave points, worst perimeter, mean concave points, worst radius, mean perimeter, worst area, mean radius, mean area, mean concavity, worst concavity, mean compactness, worst compactness, radius error, perimeter error, area error, worst texture, worst smoothness, worst symmetry, mean texture, concave points error, mean smoothness, mean symmetry, worst fractal dimension, compactness error, concavity error</dd>
+<dt>Evidence</dt><dd>25 of the tested columns are associated with the target beyond a small effect: worst concave points (correlation ratio=0.79); worst perimeter (correlation ratio=0.78); mean concave points (correlation ratio=0.78); worst radius (correlation ratio=0.78); mean perimeter (correlation ratio=0.74) and 20 more.</dd>
+<dt>Interpretation</dt><dd>A numeric feature and the target are compared by Pearson correlation. A categorical feature or target is compared by the correlation ratio (a numeric feature grouped by a categorical one) or Cramer&#x27;s V (two categorical columns), both on the same 0 to 1 scale as an absolute correlation. This is association, not causation, and says nothing about how a feature would behave in a model alongside the others.</dd>
+<dt>Limitations</dt><dd>Only pairs beyond a small effect size and significant after correcting for the number of features tested are listed. A column left out was not shown to be unrelated to the target, only not detected here.</dd>
+</dl>
+</div>
+<h2>Limitations</h2>
+<p>This report combines schema profiling, data quality checks, exploratory analysis and ML-readiness diagnostics. It does not train or evaluate a model, and these checks do not cover every way a dataset can fail. Each finding's own Limitations field states what that specific check did not test; this section is about the report as a whole.</p>
+</body>
+</html>
